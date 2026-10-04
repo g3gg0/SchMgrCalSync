@@ -11,7 +11,19 @@ export function calendarIdFromUrl(value) {
 export function scopeId(institutionId, studentId, calendarId) {
   return createHash('sha256').update(JSON.stringify(['schulmanager-exams-v1', institutionId, studentId, calendarId])).digest('hex');
 }
-export function examEvent(exam, scope, student, { prefixStudentName = false } = {}) {
+function remindersForDays(days) {
+  if (days == null) return { useDefault: true };
+  if (!Number.isSafeInteger(days) || days < 1 || days > 28) throw new Error('Reminder days must be between 1 and 28.');
+  return { useDefault: false, overrides: [{ method: 'popup', minutes: days * 24 * 60 }] };
+}
+function normalizedReminders(reminders) {
+  if (!reminders || reminders.useDefault !== false) return { useDefault: true, overrides: [] };
+  const overrides = [...(reminders.overrides ?? [])]
+    .map(({ method, minutes }) => ({ method, minutes }))
+    .sort((first, second) => first.minutes - second.minutes || first.method.localeCompare(second.method));
+  return { useDefault: false, overrides };
+}
+export function examEvent(exam, scope, student, { prefixStudentName = false, remindDays = null } = {}) {
   if (!Number.isSafeInteger(exam.id) || exam.id <= 0) throw new Error('Exam has no stable numeric ID; refusing incomplete source snapshot.');
   const date = exam.date?.slice(0, 10);
   addDays(date ?? '', 0);
@@ -25,6 +37,7 @@ export function examEvent(exam, scope, student, { prefixStudentName = false } = 
     summary,
     description: [exam.comment, `Schulmanager exam ${exam.id}; student ${student.id}`, 'Managed by schulmanager-sync (one-way).'].filter(Boolean).join('\n'),
     start: { date }, end: { date: addDays(date, 1) },
+    reminders: remindersForDays(remindDays),
     extendedProperties: { private: { smScope: scope, smExamId: String(exam.id), smStudentId: String(student.id) } }
   };
 }
@@ -50,14 +63,15 @@ export function openDatabase(path) {
 function sameEvent(remote, desired) {
   return remote.summary === desired.summary && (remote.description ?? '') === desired.description &&
     remote.start?.date === desired.start.date && remote.end?.date === desired.end.date &&
+    JSON.stringify(normalizedReminders(remote.reminders)) === JSON.stringify(normalizedReminders(desired.reminders)) &&
     Object.entries(desired.extendedProperties.private).every(([k,v]) => remote.extendedProperties?.private?.[k] === v);
 }
 
-export async function reconcile({ db, calendar, exams, student, scope, start, end, prefixStudentName = false, dryRun = false }) {
+export async function reconcile({ db, calendar, exams, student, scope, start, end, prefixStudentName = false, remindDays = null, dryRun = false }) {
   if (!Array.isArray(exams)) throw new Error('Invalid exams response; no calendar mutations performed.');
   const desired = new Map();
   for (const exam of exams) {
-    const event = examEvent(exam, scope, student, { prefixStudentName });
+    const event = examEvent(exam, scope, student, { prefixStudentName, remindDays });
     if (event.start.date < start || event.start.date > end) throw new Error('Exam outside requested range; refusing incomplete source snapshot.');
     if (desired.has(event.id) && JSON.stringify(desired.get(event.id).event) !== JSON.stringify(event)) throw new Error('Conflicting duplicate exam ID.');
     desired.set(event.id, { event, exam });

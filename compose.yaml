@@ -15,7 +15,10 @@ services:
       SYNC_WEEKS: ${SYNC_WEEKS:-26}
       SYNC_HOURS: ${SYNC_HOURS:-4}
       SYNC_TIMEZONE: ${SYNC_TIMEZONE:-Europe/Berlin}
+      SYNC_REMIND_DAYS: ${SYNC_REMIND_DAYS:-}
       SYNC_PREFIX_STUDENT_NAME: ${SYNC_PREFIX_STUDENT_NAME:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       SYNC_DB_PATH: /data/sync.sqlite
       SYNC_SESSION_PATH: /data/schulmanager-session.json
     volumes:

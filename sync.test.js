@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent } from './sync-core.js';
 import { GoogleCalendar } from './google-calendar.js';
 import { getOAuthCredentials, oauthSettings } from './google-oauth.js';
-import { configuration, hasGoogleAuth, shouldPrefixStudentName } from './sync.js';
+import { configuration, hasGoogleAuth, sendTelegramUpdate, shouldPrefixStudentName, telegramMessage } from './sync.js';
 const student = { id: 12, classId: 34 };
 const scope = scopeId(56, student.id, 'test-calendar');
 const exam = { id: 78, date: '2026-10-14', subject: { name: 'Math' }, type: { name: 'Test' }, comment: 'Chapters 1–2' };
@@ -47,6 +47,43 @@ test('exam titles include the selected first name when enabled', () => {
   assert.equal(examEvent(worksExam, scope, namedStudent, { prefixStudentName: true }).summary,
     'Raphael - Werken - Kurztest');
   assert.equal(examEvent(worksExam, scope, student, { prefixStudentName: true }).summary, 'Werken – Kurztest');
+});
+test('exam events can set a popup reminder a configured number of days before', () => {
+  assert.deepEqual(examEvent(exam, scope, student).reminders, { useDefault: true });
+  assert.deepEqual(examEvent(exam, scope, student, { remindDays: 3 }).reminders,
+    { useDefault: false, overrides: [{ method: 'popup', minutes: 4320 }] });
+  assert.throws(() => examEvent(exam, scope, student, { remindDays: 29 }), /between 1 and 28/);
+});
+test('changing event reminder settings updates its existing calendar entry', async () => {
+  const db = openDatabase(':memory:');
+  const calendar = fakeCalendar();
+  try {
+    assert.equal((await reconcile({ db, calendar, exams: [exam], ...context })).created, 1);
+    const stats = await reconcile({ db, calendar, exams: [exam], ...context, remindDays: 2 });
+    assert.equal(stats.updated, 1);
+    assert.deepEqual(calendar.remote.values().next().value.reminders,
+      { useDefault: false, overrides: [{ method: 'popup', minutes: 2880 }] });
+  } finally { db.close(); }
+});
+test('Telegram reports actual calendar changes and ignores unchanged cycles', async () => {
+  const env = { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_CHAT_ID: '1234' };
+  const summary = { studentId: 12, start: '2026-10-04', end: '2027-04-04', stats: { created: 2, updated: 1, deleted: 0 } };
+  let requestUrl;
+  let requestBody;
+  const sent = await sendTelegramUpdate(env, summary, async (url, options) => {
+    requestUrl = url;
+    requestBody = JSON.parse(options.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+  assert.equal(sent, true);
+  assert.match(requestUrl, /api\.telegram\.org\/bottest-token\/sendMessage/);
+  assert.equal(requestBody.chat_id, '1234');
+  assert.match(requestBody.text, /Neu: 2/);
+  assert.match(requestBody.text, /Geändert: 1/);
+  assert.equal(telegramMessage({ ...summary, stats: { created: 0, updated: 0, deleted: 0 } }), null);
+  assert.equal(await sendTelegramUpdate(env, { ...summary, stats: { created: 0, updated: 0, deleted: 0 } }), false);
+  await assert.rejects(sendTelegramUpdate({ TELEGRAM_BOT_TOKEN: 'token' }, summary), /Set both/);
+  await assert.rejects(sendTelegramUpdate(env, summary, async () => ({ ok: false, status: 401, json: async () => ({ ok: false }) })), /HTTP 401/);
 });
 test('date changes keep identity; past and beyond-horizon events are preserved; dry run writes nothing', async () => {
   const db = openDatabase(':memory:');
@@ -173,6 +210,9 @@ test('environment configuration supports explicit selection and rejects conflict
   assert.equal(hasGoogleAuth({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret', GOOGLE_REFRESH_TOKEN: 'token' }), true);
   assert.equal(configuration({ ...env, SCHULMANAGER_STUDENT_ID: '' }, {}).studentId, undefined);
   assert.equal(configuration({ ...env, SYNC_PREFIX_STUDENT_NAME: 'true' }, {}).prefixStudentName, true);
+  assert.equal(configuration({ ...env, SYNC_REMIND_DAYS: '3' }, {}).remindDays, 3);
+  assert.throws(() => configuration({ ...env, SYNC_REMIND_DAYS: '29' }, {}), /Reminder days must be 1\.\.28/);
+  assert.throws(() => configuration({ ...env, TELEGRAM_BOT_TOKEN: 'token' }, {}), /Set both TELEGRAM_BOT_TOKEN/);
   assert.equal(shouldPrefixStudentName(1, false), false);
   assert.equal(shouldPrefixStudentName(2, false), true);
   assert.equal(shouldPrefixStudentName(1, true), true);

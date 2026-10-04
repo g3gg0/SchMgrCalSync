@@ -65,6 +65,15 @@ Optional:
 - `SYNC_WEEKS=26`: exams from today through N weeks ahead, inclusive.
 - `SYNC_HOURS=4`: local hours divisible by this number (0,4,8,12,16,20).
 - `SYNC_TIMEZONE=Europe/Berlin`: dates and daemon scheduling timezone.
+- `SYNC_REMIND_DAYS=3`: optional Google Calendar popup reminder before each
+  synced exam; valid range is 1 to 28 days. If unset, the calendar's default
+  reminders apply. Changing this value updates existing upcoming managed events
+  on the next sync.
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`: optional pair. The bot sends one
+  message after a successful sync only when events were created, updated, or
+  deleted. No message is sent for unchanged cycles or dry runs. Start a chat with
+  the bot and ensure it can message the configured chat. Telegram failures are
+  logged but do not roll back calendar changes.
 - `SYNC_PREFIX_STUDENT_NAME=true`: prefix exam titles with the selected student's
   first name even when the account has only one associated student. If the
   Schulmanager account has multiple associated students, the selected student's

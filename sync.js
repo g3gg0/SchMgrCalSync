@@ -22,14 +22,50 @@ export function configuration(env, values) {
   if (explicitCalendarId && fromUrl && explicitCalendarId !== fromUrl) throw new Error('GOOGLE_CALENDAR_ID does not match the iCal URL.');
   const calendarId = explicitCalendarId ?? fromUrl;
   if (!calendarId) throw new Error('Set GOOGLE_CALENDAR_ICAL_URL or GOOGLE_CALENDAR_ID.');
+  const telegramBotToken = env.TELEGRAM_BOT_TOKEN?.trim() || null;
+  const telegramChatId = env.TELEGRAM_CHAT_ID?.trim() || null;
+  if (Boolean(telegramBotToken) !== Boolean(telegramChatId)) throw new Error('Set both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID, or leave both unset.');
   return { timezone, calendarId, weeks: integer(values.weeks ?? env.SYNC_WEEKS ?? 26, 'Weeks', 1, 104),
     hours: integer(values.hours ?? env.SYNC_HOURS ?? 4, 'Hours', 1, 24),
+    remindDays: env.SYNC_REMIND_DAYS ? integer(env.SYNC_REMIND_DAYS, 'Reminder days', 1, 28) : null,
     prefixStudentName: env.SYNC_PREFIX_STUDENT_NAME === 'true',
+    telegramBotToken, telegramChatId,
     dbPath: resolve(env.SYNC_DB_PATH ?? './data/sync.sqlite'),
     sessionPath: resolve(env.SYNC_SESSION_PATH ?? './data/schulmanager-session.json'),
     institutionId: env.SCHULMANAGER_INSTITUTION_ID ? integer(env.SCHULMANAGER_INSTITUTION_ID, 'Institution ID', 1, Number.MAX_SAFE_INTEGER) : null,
     studentId: env.SCHULMANAGER_STUDENT_ID || undefined,
     studentIndex: env.SCHULMANAGER_STUDENT_ID ? undefined : integer(env.SCHULMANAGER_STUDENT ?? 1, 'Student index', 1, 1000) };
+}
+export function telegramMessage({ studentId, start, end, stats }) {
+  const changes = [];
+  if (stats.created) changes.push(`Neu: ${stats.created}`);
+  if (stats.updated) changes.push(`Geändert: ${stats.updated}`);
+  if (stats.deleted) changes.push(`Entfernt: ${stats.deleted}`);
+  if (!changes.length) return null;
+  return ['Schulmanager-Kalender synchronisiert', `Schüler-ID: ${studentId}`, `Zeitraum: ${start} bis ${end}`, ...changes].join('\n');
+}
+export async function sendTelegramUpdate(env, summary, fetchImpl = fetch) {
+  const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
+  const chatId = env.TELEGRAM_CHAT_ID?.trim();
+  if (!botToken && !chatId) return false;
+  if (!botToken || !chatId) throw new Error('Set both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID, or leave both unset.');
+  const text = telegramMessage(summary);
+  if (!text) return false;
+  let response;
+  try {
+    response = await fetchImpl(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+      signal: AbortSignal.timeout(10000)
+    });
+  } catch {
+    throw new Error('Telegram request failed; check network and bot configuration.');
+  }
+  let result;
+  try { result = await response.json(); } catch {}
+  if (!response.ok || result?.ok !== true) throw new Error(`Telegram API rejected the notification (HTTP ${response.status}).`);
+  return true;
 }
 export function shouldPrefixStudentName(studentCount, forced) {
   return forced || studentCount > 1;
@@ -65,7 +101,11 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
   if (!Number.isSafeInteger(institution) || institution <= 0) throw new Error('Login has no institution ID; refusing unscoped sync.');
   const scope = scopeId(institution, student.id, config.calendarId);
   const stats = await reconcile({ db, calendar, exams: result.data, student, scope, start, end,
-    prefixStudentName: shouldPrefixStudentName(students.length, config.prefixStudentName), dryRun });
+    prefixStudentName: shouldPrefixStudentName(students.length, config.prefixStudentName), remindDays: config.remindDays, dryRun });
+  if (!dryRun && config.telegramBotToken && stats.created + stats.updated + stats.deleted > 0) {
+    try { await sendTelegramUpdate(env, { studentId: student.id, start, end, stats }); }
+    catch (error) { console.error(`Telegram notification failed: ${error.message}`); }
+  }
   console.log(JSON.stringify({ time: new Date().toISOString(), studentId: student.id, start, end, exams: result.data.length, ...stats }));
   return stats;
 }
