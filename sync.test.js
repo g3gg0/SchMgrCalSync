@@ -2,7 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent } from './sync-core.js';
 import { GoogleCalendar } from './google-calendar.js';
-import { configuration, shouldPrefixStudentName } from './sync.js';
+import { oauthSettings, saveGoogleRefreshToken } from './google-oauth.js';
+import { configuration, googleAuthForSync, shouldPrefixStudentName } from './sync.js';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 const student = { id: 12, classId: 34 };
 const scope = scopeId(56, student.id, 'test-calendar');
 const exam = { id: 78, date: '2026-10-14', subject: { name: 'Math' }, type: { name: 'Test' }, comment: 'Chapters 1–2' };
@@ -102,6 +106,32 @@ test('Google API error details are included in failures', async () => {
   await assert.rejects(calendar.list(scope), /HTTP 403 - Calendar access denied\./);
 });
 
+test('OAuth redirect accepts a full HTTPS URL and restricts insecure non-loopback URLs', () => {
+  assert.deepEqual(oauthSettings({
+    GOOGLE_OAUTH_REDIRECT_URI: 'https://calendar.example.net/oauth/google/callback',
+    GOOGLE_OAUTH_PORT: '8085'
+  }), {
+    redirectUri: 'https://calendar.example.net/oauth/google/callback',
+    callbackPath: '/oauth/google/callback',
+    port: 8085
+  });
+  assert.throws(() => oauthSettings({ GOOGLE_OAUTH_REDIRECT_URI: 'http://calendar.example.net/callback' }), /must use HTTPS/);
+  assert.equal(oauthSettings({}).redirectUri, 'http://127.0.0.1:8085/');
+});
+
+test('OAuth callback tokens persist and are reused without a refresh-token environment variable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'schulmanager-oauth-'));
+  const tokenPath = join(directory, 'tokens', 'google.json');
+  try {
+    await saveGoogleRefreshToken(tokenPath, 'saved-refresh-token');
+    const saved = JSON.parse(await readFile(tokenPath, 'utf8'));
+    assert.equal(saved.refresh_token, 'saved-refresh-token');
+    const auth = await googleAuthForSync({ GOOGLE_CLIENT_ID: 'client-id', GOOGLE_CLIENT_SECRET: 'client-secret' }, tokenPath);
+    assert.equal(auth.credentials.refresh_token, 'saved-refresh-token');
+    await assert.rejects(saveGoogleRefreshToken(tokenPath, ''), /empty Google refresh token/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('Google deleted ID replacement stays linked and is rediscovered on the next sync', async () => {
   const db = openDatabase(':memory:'); const calendar = fakeCalendar();
   const create = calendar.upsert;
@@ -147,6 +177,8 @@ test('environment configuration supports explicit selection and rejects conflict
   const config = configuration(env, { weeks: '8', hours: '4' });
   assert.equal(config.weeks, 8); assert.equal(config.studentIndex, undefined);
   assert.equal(config.prefixStudentName, false);
+  assert.ok(config.googleTokenPath.endsWith('data/google-refresh-token.json'));
+  assert.equal(configuration({ ...env, SCHULMANAGER_STUDENT_ID: '' }, {}).studentId, undefined);
   assert.equal(configuration({ ...env, SYNC_PREFIX_STUDENT_NAME: 'true' }, {}).prefixStudentName, true);
   assert.equal(shouldPrefixStudentName(1, false), false);
   assert.equal(shouldPrefixStudentName(2, false), true);

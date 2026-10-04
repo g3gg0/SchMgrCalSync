@@ -1,9 +1,27 @@
 services:
   schulmanager-sync:
-    image: ${SCHULMANAGER_IMAGE:-schulmanager-sync:local}
+    image: ghcr.io/g3gg0/schmgrcalsync:latest
     build: .
-    env_file: .env
+    ports:
+      - "${GOOGLE_OAUTH_PORT:-8085}:${GOOGLE_OAUTH_PORT:-8085}"
     environment:
+      SCHULMANAGER_USERNAME: ${SCHULMANAGER_USERNAME:?Set in Portainer stack environment}
+      SCHULMANAGER_PASSWORD: ${SCHULMANAGER_PASSWORD:?Set in Portainer stack environment}
+      SCHULMANAGER_STUDENT_ID: ${SCHULMANAGER_STUDENT_ID:-}
+      SCHULMANAGER_STUDENT: ${SCHULMANAGER_STUDENT:-1}
+      SCHULMANAGER_INSTITUTION_ID: ${SCHULMANAGER_INSTITUTION_ID:-}
+      GOOGLE_CALENDAR_ICAL_URL: ${GOOGLE_CALENDAR_ICAL_URL:-}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      GOOGLE_OAUTH_PORT: ${GOOGLE_OAUTH_PORT:-8085}
+      GOOGLE_TOKEN_PATH: /data/google-refresh-token.json
+      SYNC_WEEKS: ${SYNC_WEEKS:-26}
+      SYNC_HOURS: ${SYNC_HOURS:-4}
+      SYNC_TIMEZONE: ${SYNC_TIMEZONE:-Europe/Berlin}
+      SYNC_PREFIX_STUDENT_NAME: ${SYNC_PREFIX_STUDENT_NAME:-false}
       SYNC_DB_PATH: /data/sync.sqlite
       SYNC_SESSION_PATH: /data/schulmanager-session.json
     volumes:

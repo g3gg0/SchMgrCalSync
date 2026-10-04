@@ -1,15 +1,15 @@
 import { OAuth2Client, GoogleAuth } from 'google-auth-library';
 import { randomBytes } from 'node:crypto';
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-export function googleAuth(env) {
-  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REFRESH_TOKEN) {
+export function googleAuth(env, refreshToken = env.GOOGLE_REFRESH_TOKEN) {
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && refreshToken) {
     const auth = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET);
-    auth.setCredentials({ refresh_token: env.GOOGLE_REFRESH_TOKEN });
+    auth.setCredentials({ refresh_token: refreshToken });
     return auth;
   }
   if (env.GOOGLE_SERVICE_ACCOUNT_JSON) return new GoogleAuth({ credentials: JSON.parse(env.GOOGLE_SERVICE_ACCOUNT_JSON), scopes: [SCOPE] });
   if (env.GOOGLE_APPLICATION_CREDENTIALS) return new GoogleAuth({ keyFile: env.GOOGLE_APPLICATION_CREDENTIALS, scopes: [SCOPE] });
-  throw new Error('Google writes require GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN (or service-account credentials). A private iCal URL is read-only.');
+  throw new Error('Google writes require OAuth client credentials and a saved refresh token, or service-account credentials. A private iCal URL is read-only.');
 }
 export class GoogleCalendar {
   constructor(auth, calendarId, fetchImpl = fetch) { Object.assign(this, { auth, calendarId, fetchImpl }); }
