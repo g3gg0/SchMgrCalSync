@@ -181,6 +181,24 @@ test('calendar reconciliation updates timed events and preserves their times in 
   assert.equal(patched.start.timeZone, 'Europe/Berlin');
   assert.equal(patched.start.date, null);
 });
+test('Google timezone-offset normalization does not cause repeated timed-event updates', async () => {
+  const db = openDatabase(':memory:');
+  const original = { id: 205, summary: 'Meeting', allDay: false,
+    start: '2026-10-08T07:00:00.000Z', end: '2026-10-08T08:15:00.000Z' };
+  const desired = calendarEvent(original, scope, student, { timeZone: 'Europe/Berlin' });
+  const remote = {
+    ...desired,
+    start: { dateTime: '2026-10-08T09:00:00+02:00', timeZone: 'Europe/Berlin' },
+    end: { dateTime: '2026-10-08T10:15:00+02:00', timeZone: 'Europe/Berlin' }
+  };
+  const calendar = fakeCalendar([remote]);
+  try {
+    const result = await reconcile({ db, calendar, exams: [original], ...context,
+      scope, eventFactory: calendarEvent, identityProperty: 'smCalendarOccurrenceId', eventOptions: { timeZone: 'Europe/Berlin' } });
+    assert.equal(result.updated, 0);
+    assert.equal(result.unchanged, 1);
+  } finally { db.close(); }
+});
 test('Telegram reports actual calendar changes and ignores unchanged cycles', async () => {
   const env = { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_CHAT_ID: '1234' };
   const summary = { studentId: 12, start: '2026-10-04', end: '2027-04-04', stats: {

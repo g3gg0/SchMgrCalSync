@@ -201,7 +201,20 @@ function sameEvent(remote, desired) {
 }
 function sameCalendarTime(current, target) {
   if (target.date) return current?.date === target.date;
-  return current?.dateTime === target.dateTime && (current?.timeZone ?? '') === (target.timeZone ?? '');
+  if (!current?.dateTime || !target.dateTime) return false;
+  if (current.timeZone && target.timeZone && current.timeZone !== target.timeZone) return false;
+  const timeZone = target.timeZone ?? current.timeZone ?? 'UTC';
+  const localDateTime = value => {
+    if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return value.slice(0, 19);
+    const instant = new Date(value);
+    if (!Number.isFinite(instant.getTime())) return value;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(instant).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  };
+  return localDateTime(current.dateTime) === localDateTime(target.dateTime);
 }
 function eventDetails(event, date = event.start?.date) {
   return { date: date ?? event.start?.dateTime?.slice(0, 10), summary: event.summary ?? 'Prüfung' };
