@@ -45,8 +45,11 @@ export class GoogleCalendar {
     return items;
   }
   update(event) {
+    const calendarTime = value => value.date
+      ? { date: value.date, dateTime: null, timeZone: null }
+      : { date: null, dateTime: value.dateTime, timeZone: value.timeZone };
     return this.request('PATCH', `/${event.id}`, { ...event, status: 'confirmed',
-      start: { ...event.start, dateTime: null, timeZone: null }, end: { ...event.end, dateTime: null, timeZone: null } }, { sendUpdates: 'none' });
+      start: calendarTime(event.start), end: calendarTime(event.end) }, { sendUpdates: 'none' });
   }
   async upsert(event, scope) {
     try { return await this.request('POST', '', event, { sendUpdates: 'none' }); }

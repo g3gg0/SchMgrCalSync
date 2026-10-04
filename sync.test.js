@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent, sickEvent, exemptionEvent } from './sync-core.js';
+import { calendarEvent, calendarEventsInRange, calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent, sickEvent, exemptionEvent } from './sync-core.js';
 import { GoogleCalendar } from './google-calendar.js';
 import { getOAuthCredentials, oauthSettings } from './google-oauth.js';
 import { configuration, hasGoogleAuth, recordsForStudentRange, sendTelegramUpdate, shouldPrefixStudentName, telegramMessage } from './sync.js';
@@ -49,6 +49,21 @@ test('exam titles include the selected first name when enabled', () => {
   assert.equal(examEvent(worksExam, scope, namedStudent, { prefixStudentName: true }).summary,
     'Raphael - Werken - Kurztest');
   assert.equal(examEvent(worksExam, scope, student, { prefixStudentName: true }).summary, 'Werken – Kurztest');
+});
+test('exam entries include class hours in the title and created/updated times in the description', () => {
+  const examWithHours = {
+    ...exam,
+    subject: { name: 'Werken' },
+    type: { name: 'Kurztest' },
+    startClassHour: { number: '5', from: '11:30:00', until: '12:15:00' },
+    endClassHour: { number: '5', from: '11:30:00', until: '12:15:00' },
+    createdAt: '2026-09-23T05:43:59.973Z',
+    updatedAt: '2026-09-24T06:10:00.000Z'
+  };
+  const event = examEvent(examWithHours, scope, { ...student, firstname: 'Raphael' }, { prefixStudentName: true });
+  assert.equal(event.summary, 'Raphael - Werken - Kurztest (5. Stunde, 11:30–12:15)');
+  assert.match(event.description, /Erstellt: 23\.09\.26, 07:43/);
+  assert.match(event.description, /Aktualisiert: 24\.09\.26, 08:10/);
 });
 test('exam events can set a popup reminder a configured number of days before', () => {
   assert.deepEqual(examEvent(exam, scope, student).reminders, { useDefault: true });
@@ -105,6 +120,64 @@ test('absence records are filtered to selected student and overlapping date rang
   ];
   assert.deepEqual(recordsForStudentRange(records, student.id, context.start, context.end).map(record => record.id), [1]);
   assert.throws(() => recordsForStudentRange([{ studentId: student.id }], student.id, context.start, context.end), /Invalid date/);
+});
+test('calendar events expand weekly recurrences and never set reminders', () => {
+  const calendarData = {
+    nonRecurringEvents: [{
+      id: 201, summary: 'Assembly', description: 'School assembly', location: 'Hall', organizer: 'School',
+      allDay: true, start: '2026-10-10T00:00:00.000Z', end: '2026-10-11T00:00:00.000Z'
+    }, {
+      id: 202, summary: 'Meeting', description: null, location: null, organizer: 'School',
+      allDay: false, start: '2026-10-08T07:00:00.000Z', end: '2026-10-08T08:15:00.000Z'
+    }],
+    recurringEvents: [{
+      id: 203, summary: 'Weekly event', description: null, location: null, organizer: 'School', allDay: true,
+      start: '2026-09-01T00:00:00.000Z', end: '2026-09-02T00:00:00.000Z',
+      recurrencePattern: { start: '2026-09-01T00:00:00.000Z', end: '2026-10-20T00:00:00.000Z', frequency: 'Weekly', interval: 1, weekday: 2 }
+    }]
+  };
+  const records = calendarEventsInRange(calendarData, '2026-10-04', '2026-10-20');
+  assert.equal(records.length, 5);
+  assert.deepEqual(records.filter(record => record.sourceEventId === 203).map(record => record.start.slice(0, 10)),
+    ['2026-10-06', '2026-10-13', '2026-10-20']);
+  const allDay = calendarEvent(records.find(record => record.id === 201), scope, student);
+  assert.deepEqual(allDay.start, { date: '2026-10-10' });
+  assert.deepEqual(allDay.end, { date: '2026-10-11' });
+  assert.deepEqual(allDay.reminders, { useDefault: false, overrides: [] });
+  const timed = calendarEvent(records.find(record => record.id === 202), scope, student);
+  assert.deepEqual(timed.start, { dateTime: '2026-10-08T07:00:00.000Z', timeZone: 'Europe/Berlin' });
+  assert.deepEqual(timed.end, { dateTime: '2026-10-08T08:15:00.000Z', timeZone: 'Europe/Berlin' });
+  assert.deepEqual(timed.reminders, { useDefault: false, overrides: [] });
+  assert.throws(() => calendarEventsInRange({ nonRecurringEvents: [], recurringEvents: [{
+    id: 999, allDay: true, start: '2026-10-06T00:00:00.000Z', end: '2026-10-07T00:00:00.000Z',
+    recurrencePattern: { frequency: 'Monthly', start: '2026-10-06T00:00:00.000Z', end: null }
+  }] }, context.start, context.end), /Unsupported calendar recurrence frequency/);
+});
+test('calendar reconciliation updates timed events and preserves their times in Google PATCH', async () => {
+  const db = openDatabase(':memory:');
+  const calendar = fakeCalendar();
+  const calendarScope = scopeId(56, student.id, 'test-calendar', 'calendar');
+  const record = { id: 204, summary: 'Meeting', allDay: false, start: '2026-10-08T07:00:00.000Z',
+    end: '2026-10-08T08:00:00.000Z' };
+  const reconcileCalendar = entries => reconcile({ db, calendar, exams: entries, ...context, scope: calendarScope,
+    eventFactory: calendarEvent, identityProperty: 'smCalendarOccurrenceId', eventOptions: { timeZone: 'Europe/Berlin' } });
+  try {
+    assert.equal((await reconcileCalendar([record])).created, 1);
+    assert.equal((await reconcileCalendar([{ ...record, start: '2026-10-08T07:15:00.000Z' }])).updated, 1);
+  } finally { db.close(); }
+
+  const auth = { getRequestHeaders: async () => new Headers({ Authorization: 'Bearer fake' }) };
+  let patched;
+  const api = new GoogleCalendar(auth, 'test', async (url, options) => {
+    patched = JSON.parse(options.body);
+    return { ok: true, status: 200, json: async () => patched };
+  });
+  const event = calendarEvent({ ...record, start: '2026-10-08T07:15:00.000Z' }, calendarScope, student,
+    { timeZone: 'Europe/Berlin' });
+  await api.update(event);
+  assert.equal(patched.start.dateTime, '2026-10-08T07:15:00.000Z');
+  assert.equal(patched.start.timeZone, 'Europe/Berlin');
+  assert.equal(patched.start.date, null);
 });
 test('Telegram reports actual calendar changes and ignores unchanged cycles', async () => {
   const env = { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_CHAT_ID: '1234' };

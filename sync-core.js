@@ -30,16 +30,123 @@ export function examEvent(exam, scope, student, { prefixStudentName = false, rem
   addDays(date ?? '', 0);
   const subject = exam.subject?.name ?? exam.subjectText ?? 'Prüfung';
   const labels = [subject, exam.type?.name].filter(Boolean);
-  const summary = prefixStudentName && student.firstname
-    ? [student.firstname, ...labels].join(' - ')
-    : labels.join(' – ');
+  const namePrefix = prefixStudentName && student.firstname ? `${student.firstname} - ` : '';
+  const classHour = classHourDetails(exam.startClassHour, exam.endClassHour);
+  const summary = `${namePrefix}${labels.join(namePrefix ? ' - ' : ' – ')}${classHour ? ` (${classHour})` : ''}`;
+  const timestamps = [
+    exam.createdAt ? `Erstellt: ${formatTimestamp(exam.createdAt)}` : null,
+    exam.updatedAt ? `Aktualisiert: ${formatTimestamp(exam.updatedAt)}` : null
+  ].filter(Boolean);
   return {
     id: `sm${createHash('sha256').update(`${scope}:${exam.id}`).digest('hex')}`,
     summary,
-    description: [exam.comment, `Schulmanager exam ${exam.id}; student ${student.id}`, 'Managed by schulmanager-sync (one-way).'].filter(Boolean).join('\n'),
+    description: [exam.comment, ...timestamps, `Schulmanager exam ${exam.id}; student ${student.id}`, 'Managed by schulmanager-sync (one-way).'].filter(Boolean).join('\n'),
     start: { date }, end: { date: addDays(date, 1) },
     reminders: remindersForDays(remindDays),
     extendedProperties: { private: { smScope: scope, smExamId: String(exam.id), smStudentId: String(student.id) } }
+  };
+}
+function classHourDetails(startHour, endHour) {
+  if (!startHour && !endHour) return '';
+  const firstNumber = startHour?.number ?? endHour?.number;
+  const lastNumber = endHour?.number ?? firstNumber;
+  const lesson = firstNumber
+    ? firstNumber === lastNumber ? `${firstNumber}. Stunde` : `${firstNumber}.–${lastNumber}. Stunde`
+    : '';
+  const firstTime = startHour?.from;
+  const lastTime = endHour?.until ?? startHour?.until;
+  const time = firstTime && lastTime ? `${firstTime.slice(0, 5)}–${lastTime.slice(0, 5)}` : '';
+  return [lesson, time].filter(Boolean).join(', ');
+}
+function formatTimestamp(value, timeZone = 'Europe/Berlin') {
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return String(value);
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone, dateStyle: 'short', timeStyle: 'short', hourCycle: 'h23'
+  }).format(timestamp);
+}
+
+function dateFromSource(value) {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw new Error('Calendar event has an invalid date.');
+  return value.slice(0, 10);
+}
+function withSourceDate(value, date) {
+  return `${date}${value.slice(10)}`;
+}
+function recurrenceOccurrences(event, start, end) {
+  const pattern = event.recurrencePattern;
+  if (!pattern) return [event];
+  if (pattern.frequency !== 'Weekly' && pattern.frequency !== 'Daily') {
+    throw new Error(`Unsupported calendar recurrence frequency: ${pattern.frequency}. No calendar events changed.`);
+  }
+  const seriesStart = dateFromSource(pattern.start ?? event.start);
+  const seriesEnd = pattern.end ? dateFromSource(pattern.end) : end;
+  const recurrenceStart = seriesStart > start ? seriesStart : start;
+  const recurrenceEnd = seriesEnd < end ? seriesEnd : end;
+  const interval = Number(pattern.interval ?? 1);
+  if (!Number.isSafeInteger(interval) || interval < 1) throw new Error('Calendar recurrence has an invalid interval.');
+  const weekday = pattern.frequency === 'Weekly'
+    ? Number(pattern.weekday ?? new Date(`${seriesStart}T00:00:00Z`).getUTCDay())
+    : null;
+  if (weekday != null && (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)) throw new Error('Calendar recurrence has an invalid weekday.');
+  const sourceStart = Date.parse(event.start);
+  const sourceEnd = Date.parse(event.end);
+  if (!Number.isFinite(sourceStart) || !Number.isFinite(sourceEnd) || sourceEnd <= sourceStart) {
+    throw new Error('Calendar recurrence has an invalid start/end time.');
+  }
+  const duration = sourceEnd - sourceStart;
+  const durationDays = Math.round(duration / 86400000);
+  const output = [];
+  for (let date = recurrenceStart; date <= recurrenceEnd; date = addDays(date, 1)) {
+    const elapsedDays = (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${seriesStart}T00:00:00Z`)) / 86400000;
+    const matches = pattern.frequency === 'Daily'
+      ? elapsedDays % interval === 0
+      : new Date(`${date}T00:00:00Z`).getUTCDay() === weekday && Math.floor(elapsedDays / 7) % interval === 0;
+    if (!matches) continue;
+    const occurrenceNumber = pattern.frequency === 'Daily'
+      ? Math.floor(elapsedDays / interval) + 1
+      : Math.floor(Math.floor(elapsedDays / 7) / interval) + 1;
+    if (pattern.count != null && occurrenceNumber > pattern.count) continue;
+    const occurrenceStart = withSourceDate(event.start, date);
+    const occurrenceEnd = event.allDay
+      ? withSourceDate(event.end, addDays(date, durationDays))
+      : new Date(Date.parse(occurrenceStart) + duration).toISOString();
+    output.push({ ...event, id: `${event.id}@${date}`, sourceEventId: event.id, start: occurrenceStart, end: occurrenceEnd });
+  }
+  return output;
+}
+export function calendarEventsInRange(data, start, end) {
+  if (!data || !Array.isArray(data.nonRecurringEvents) || !Array.isArray(data.recurringEvents)) {
+    throw new Error('Invalid calendar response; no calendar events changed.');
+  }
+  const events = [];
+  for (const event of data.nonRecurringEvents) events.push({ ...event, sourceEventId: event.id });
+  for (const event of data.recurringEvents) events.push(...recurrenceOccurrences(event, start, end));
+  return events.filter(event => {
+    const eventStart = dateFromSource(event.start);
+    const eventEnd = dateFromSource(event.end);
+    const lastDate = event.allDay ? addDays(eventEnd, -1) : eventEnd;
+    return eventStart <= end && lastDate >= start;
+  });
+}
+export function calendarEvent(record, scope, student, { timeZone = 'Europe/Berlin' } = {}) {
+  const sourceId = String(record.sourceEventId ?? record.id);
+  const occurrenceId = String(record.id);
+  const allDay = record.allDay === true;
+  const startDate = dateFromSource(record.start);
+  const endDate = dateFromSource(record.end);
+  const start = allDay ? { date: startDate } : { dateTime: new Date(record.start).toISOString(), timeZone };
+  const end = allDay ? { date: endDate } : { dateTime: new Date(record.end).toISOString(), timeZone };
+  return {
+    id: `sm${createHash('sha256').update(`${scope}:calendar:${occurrenceId}`).digest('hex')}`,
+    summary: record.summary || 'Schulmanager-Termin',
+    description: [record.description, record.organizer ? `Organisiert von: ${record.organizer}` : null,
+      `Schulmanager calendar event ${sourceId}; student ${student.id}`, 'Managed by schulmanager-sync (one-way).']
+      .filter(Boolean).join('\n'),
+    location: record.location || undefined,
+    start, end,
+    reminders: { useDefault: false, overrides: [] },
+    extendedProperties: { private: { smScope: scope, smCalendarId: String(sourceId), smCalendarOccurrenceId: occurrenceId, smStudentId: String(student.id) } }
   };
 }
 function absenceEvent(record, scope, student, type) {
@@ -85,24 +192,32 @@ export function openDatabase(path) {
 }
 function sameEvent(remote, desired) {
   return remote.summary === desired.summary && (remote.description ?? '') === desired.description &&
-    remote.start?.date === desired.start.date && remote.end?.date === desired.end.date &&
+    sameCalendarTime(remote.start, desired.start) && sameCalendarTime(remote.end, desired.end) &&
+    (remote.location ?? '') === (desired.location ?? '') &&
     JSON.stringify(normalizedReminders(remote.reminders)) === JSON.stringify(normalizedReminders(desired.reminders)) &&
     Object.entries(desired.extendedProperties.private).every(([k,v]) => remote.extendedProperties?.private?.[k] === v);
 }
+function sameCalendarTime(current, target) {
+  if (target.date) return current?.date === target.date;
+  return current?.dateTime === target.dateTime && (current?.timeZone ?? '') === (target.timeZone ?? '');
+}
 function eventDetails(event, date = event.start?.date) {
-  return { date, summary: event.summary ?? 'Prüfung' };
+  return { date: date ?? event.start?.dateTime?.slice(0, 10), summary: event.summary ?? 'Prüfung' };
 }
 
 export async function reconcile({ db, calendar, exams, student, scope, start, end, prefixStudentName = false, remindDays = null,
-  eventFactory = examEvent, identityProperty = 'smExamId', dryRun = false }) {
+  eventFactory = examEvent, identityProperty = 'smExamId', eventOptions = {}, dryRun = false }) {
   if (!Array.isArray(exams)) throw new Error('Invalid source snapshot; no calendar mutations performed.');
   const desired = new Map();
   for (const record of exams) {
-    const event = eventFactory(record, scope, student, { prefixStudentName, remindDays });
-    const eventLastDate = addDays(event.end.date, -1);
-    if (event.start.date > end || eventLastDate < start) throw new Error('Event outside requested range; refusing incomplete source snapshot.');
+    const event = eventFactory(record, scope, student, { prefixStudentName, remindDays, ...eventOptions });
+    const eventStartDate = event.start.date ?? event.start.dateTime?.slice(0, 10);
+    const eventLastDate = event.end.date ? addDays(event.end.date, -1) : event.end.dateTime?.slice(0, 10);
+    if (!eventStartDate || !eventLastDate || eventStartDate > end || eventLastDate < start) {
+      throw new Error('Event outside requested range or missing dates; refusing incomplete source snapshot.');
+    }
     if (desired.has(event.id) && JSON.stringify(desired.get(event.id).event) !== JSON.stringify(event)) throw new Error('Conflicting duplicate source ID.');
-    desired.set(event.id, { event, record });
+    desired.set(event.id, { event, record, eventStartDate });
   }
   // Hold a SQLite writer lock throughout reconciliation; another process cannot
   // run a competing cycle against this DB. Google operations are recoverable by IDs.
@@ -117,13 +232,13 @@ export async function reconcile({ db, calendar, exams, student, scope, start, en
     const keptIds = new Set();
     const stats = { created: 0, updated: 0, deleted: 0, unchanged: 0, dryRun,
       changes: { created: [], updated: [], deleted: [] } };
-    for (const { event, record } of desired.values()) {
+    for (const { event, record, eventStartDate } of desired.values()) {
       const recordId = String(record.id);
       const row = stored.find(row => row.exam_id === recordId);
       const found = (row && existing.get(row.google_id)) ?? existing.get(event.id) ?? owned.find(e => e.extendedProperties?.private?.[identityProperty] === recordId);
       if (found) event.id = found.id;
       if (!dryRun) db.prepare(`INSERT INTO exams(scope,exam_id,google_id,exam_date,source_json) VALUES(?,?,?,?,?)
-        ON CONFLICT(scope,exam_id) DO UPDATE SET google_id=excluded.google_id,exam_date=excluded.exam_date,source_json=excluded.source_json`).run(scope, recordId, event.id, event.start.date, JSON.stringify(record));
+        ON CONFLICT(scope,exam_id) DO UPDATE SET google_id=excluded.google_id,exam_date=excluded.exam_date,source_json=excluded.source_json`).run(scope, recordId, event.id, eventStartDate, JSON.stringify(record));
       if (!found) {
         if (!dryRun) {
           const created = await calendar.upsert(event, scope);
@@ -131,12 +246,12 @@ export async function reconcile({ db, calendar, exams, student, scope, start, en
           db.prepare('UPDATE exams SET google_id=? WHERE scope=? AND exam_id=?').run(event.id, scope, recordId);
         }
         stats.created++;
-        stats.changes.created.push(eventDetails(event));
+        stats.changes.created.push(eventDetails(event, eventStartDate));
       }
       else if (!sameEvent(found, event)) {
         if (!dryRun) await calendar.update(event);
         stats.updated++;
-        stats.changes.updated.push(eventDetails(event));
+        stats.changes.updated.push(eventDetails(event, eventStartDate));
       }
       else stats.unchanged++;
       keptIds.add(event.id);

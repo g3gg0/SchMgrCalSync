@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { SchulmanagerClient, selectStudent, studentsFromUser, addDays } from './client.js';
 import { saveSession } from './session.js';
 import { googleAuth, GoogleCalendar } from './google-calendar.js';
-import { calendarIdFromUrl, scopeId, openDatabase, reconcile, nextRun, sickEvent, exemptionEvent } from './sync-core.js';
+import { calendarIdFromUrl, scopeId, openDatabase, reconcile, nextRun, sickEvent, exemptionEvent, calendarEventsInRange, calendarEvent } from './sync-core.js';
 
 function integer(value, name, min, max) {
   const n = Number(value);
@@ -135,10 +135,11 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
       include: [{ association: 'student', required: true }]
     }] }, uiState: 'main.modules.exemptions.request' }
   };
-  const [examResult, sickResult, exemptionResult] = await client.callRequests([
+  const [examResult, sickResult, exemptionResult, calendarResult] = await client.callRequests([
     { moduleName: 'exams', endpointName: 'get-exams', parameters: { student, start, end } },
     { moduleName: 'sick', endpointName: 'get-sick-notes-as-student-fully-entitled' },
-    exemptionRequest
+    exemptionRequest,
+    { moduleName: 'calendar', endpointName: 'get-events-for-user', parameters: { start, end, includeHolidays: false } }
   ]);
   const requireRecords = (result, section) => {
     if (Number(result.status) >= 400 || !Array.isArray(result.data)) {
@@ -150,6 +151,10 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
   const sickNotes = recordsForStudentRange(requireRecords(sickResult, 'sick notes'), student.id, start, end);
   const exemptions = recordsForStudentRange(requireRecords(exemptionResult, 'exemptions'), student.id, start, end)
     .filter(record => record.isInternal !== true);
+  if (Number(calendarResult.status) >= 400 || !calendarResult.data || typeof calendarResult.data !== 'object') {
+    throw new Error(`Schulmanager calendar fetch failed (${calendarResult.status ?? 'invalid response'}); no calendar events changed.`);
+  }
+  const calendarEvents = calendarEventsInRange(calendarResult.data, start, end);
   const institution = client.user.institutionId;
   if (!Number.isSafeInteger(institution) || institution <= 0) throw new Error('Login has no institution ID; refusing unscoped sync.');
   const sources = [
@@ -158,14 +163,16 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
     { scope: scopeId(institution, student.id, config.calendarId, 'sick'), records: sickNotes,
       eventFactory: sickEvent, identityProperty: 'smSickId' },
     { scope: scopeId(institution, student.id, config.calendarId, 'exemptions'), records: exemptions,
-      eventFactory: exemptionEvent, identityProperty: 'smExemptionId' }
+      eventFactory: exemptionEvent, identityProperty: 'smExemptionId' },
+    { scope: scopeId(institution, student.id, config.calendarId, 'calendar'), records: calendarEvents,
+      eventFactory: calendarEvent, identityProperty: 'smCalendarOccurrenceId', eventOptions: { timeZone: config.timezone } }
   ];
   const stats = { created: 0, updated: 0, deleted: 0, unchanged: 0, dryRun,
     changes: { created: [], updated: [], deleted: [] } };
   for (const source of sources) {
     const result = await reconcile({ db, calendar, exams: source.records, student, scope: source.scope, start, end,
       eventFactory: source.eventFactory, identityProperty: source.identityProperty,
-      prefixStudentName: source.prefixStudentName, remindDays: source.remindDays, dryRun });
+      prefixStudentName: source.prefixStudentName, remindDays: source.remindDays, eventOptions: source.eventOptions, dryRun });
     for (const key of ['created', 'updated', 'deleted', 'unchanged']) stats[key] += result[key];
     for (const key of ['created', 'updated', 'deleted']) stats.changes[key].push(...result.changes[key]);
   }
@@ -174,7 +181,7 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
     catch (error) { console.error(`Telegram notification failed: ${error.message}`); }
   }
   console.log(JSON.stringify({ time: new Date().toISOString(), studentId: student.id, start, end,
-    exams: exams.length, sickNotes: sickNotes.length, exemptions: exemptions.length, ...stats }));
+    exams: exams.length, sickNotes: sickNotes.length, exemptions: exemptions.length, calendarEvents: calendarEvents.length, ...stats }));
   return stats;
 }
 export async function main() {

@@ -46,6 +46,15 @@ all-day `Krankmeldung` events. Exemptions become all-day `Beurlaubung` events;
 approval-state change updates the existing event. These absence events never
 receive the `SYNC_REMIND_DAYS` popup reminder.
 
+Events from the Schulmanager calendar module are also imported, including
+one-time events and daily/weekly recurring events expanded within the sync
+horizon. Their titles, descriptions, locations, all-day state and times are
+preserved. Calendar-module events never receive reminders. Recurrence patterns
+other than daily or weekly currently stop the sync before any calendar changes.
+For exams, the title includes the start/end class-hour numbers and times when
+provided; the description includes the Schulmanager `createdAt` and `updatedAt`
+timestamps in the configured local timezone.
+
 Alternatively use a service account: share the target calendar with its email
 and give it permission to make changes to events. Supply credentials with
 `GOOGLE_SERVICE_ACCOUNT_JSON` or mount its JSON key and set
