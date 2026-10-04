@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SchulmanagerClient, selectStudent, studentsFromUser, addDays } from './client.js';
 import { saveSession } from './session.js';
 import { googleAuth, GoogleCalendar } from './google-calendar.js';
-import { authorizeGoogle } from './google-oauth.js';
 import { calendarIdFromUrl, scopeId, openDatabase, reconcile, nextRun } from './sync-core.js';
 
 function integer(value, name, min, max) {
@@ -27,7 +26,6 @@ export function configuration(env, values) {
     hours: integer(values.hours ?? env.SYNC_HOURS ?? 4, 'Hours', 1, 24),
     prefixStudentName: env.SYNC_PREFIX_STUDENT_NAME === 'true',
     dbPath: resolve(env.SYNC_DB_PATH ?? './data/sync.sqlite'),
-    googleTokenPath: resolve(env.GOOGLE_TOKEN_PATH || './data/google-refresh-token.json'),
     sessionPath: resolve(env.SYNC_SESSION_PATH ?? './data/schulmanager-session.json'),
     institutionId: env.SCHULMANAGER_INSTITUTION_ID ? integer(env.SCHULMANAGER_INSTITUTION_ID, 'Institution ID', 1, Number.MAX_SAFE_INTEGER) : null,
     studentId: env.SCHULMANAGER_STUDENT_ID || undefined,
@@ -35,17 +33,6 @@ export function configuration(env, values) {
 }
 export function shouldPrefixStudentName(studentCount, forced) {
   return forced || studentCount > 1;
-}
-export async function googleAuthForSync(env, tokenPath) {
-  if (env.GOOGLE_SERVICE_ACCOUNT_JSON || env.GOOGLE_APPLICATION_CREDENTIALS) return googleAuth(env);
-  let refreshToken = env.GOOGLE_REFRESH_TOKEN;
-  if (!refreshToken) {
-    try { refreshToken = JSON.parse(await readFile(tokenPath, 'utf8')).refresh_token; }
-    catch (error) {
-      if (error.code !== 'ENOENT') throw new Error(`Cannot read saved Google token: ${error.message}`);
-    }
-  }
-  return refreshToken ? googleAuth(env, refreshToken) : authorizeGoogle(env, tokenPath);
 }
 export async function runCycle(config, env, calendar, db, { dryRun = false } = {}) {
   const client = new SchulmanagerClient({ username: env.SCHULMANAGER_USERNAME, password: env.SCHULMANAGER_PASSWORD,
@@ -74,8 +61,7 @@ export async function main() {
     console.log('Usage: node sync.js [--weeks 26] [--daemon --hours 4] [--dry-run]\nEnvironment configuration and OAuth setup: see SYNC.md. Runs immediately; daemon then runs at matching local hour boundaries.'); return;
   }
   const env = process.env, config = configuration(env, values);
-  const auth = await googleAuthForSync(env, config.googleTokenPath);
-  const calendar = new GoogleCalendar(auth, config.calendarId);
+  const calendar = new GoogleCalendar(googleAuth(env), config.calendarId);
   await mkdir(dirname(config.dbPath), { recursive: true });
   const db = openDatabase(config.dbPath);
   let stopped = false, wake;

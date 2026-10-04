@@ -9,46 +9,34 @@ Google's private iCal address is read-only. It identifies the target calendar,
 but is not a write credential. This tool extracts the calendar ID without
 fetching or logging that secret URL. Writes use the Calendar API.
 
-For a headless Portainer/Docker deployment:
+For Portainer, generate the Google token once on your own computer. The sync
+container does not host an OAuth callback and needs no public callback URL,
+HTTPS endpoint, reverse proxy, or inbound port.
 
 1. Create a Google Cloud project and enable the **Google Calendar API**.
 2. Configure its OAuth consent screen for your account. If the app is in Testing,
   add yourself as a test user. Google commonly expires Calendar refresh tokens
   after seven days for external apps in Testing; move to Production for ongoing
   unattended use. Personal-use apps may still show an unverified-app warning.
-3. Point a public DNS name (for example `sync.example.net`) to the Docker host.
-  Forward inbound TCP ports 80 and 443 through your router/firewall, and make
-  sure neither port is already in use.
-4. Create an OAuth client of type **Web application**. Set its authorized redirect
-  URI to the exact `GOOGLE_OAUTH_REDIRECT_URI`, including protocol, path, port
-  (if any), and trailing slash. For example:
-  `https://sync.example.net/oauth/google/callback`.
-5. Set `GOOGLE_OAUTH_DOMAIN`, `GOOGLE_OAUTH_REDIRECT_URI`, `GOOGLE_CLIENT_ID`,
-  and `GOOGLE_CLIENT_SECRET` in the Portainer stack environment. The Compose
-  stack includes Caddy: it obtains and renews the HTTPS certificate
-  automatically, terminates TLS, and proxies the callback internally to the
-  app's HTTP listener. The app's port is not published publicly. Compose also
-  explicitly passes the Schulmanager credentials; Portainer variables are not
-  passed into a container unless listed under `environment`.
-6. Start the stack. If no `GOOGLE_REFRESH_TOKEN` is supplied and no saved token
-  exists, the container logs an authorization URL. Open it, approve access, and
-  Google redirects to the configured callback. The container saves the refresh
-  token to `/data/google-refresh-token.json` in the persistent `sync-data`
-  volume. No token needs to be copied into Portainer.
+3. Create an OAuth client of type **Desktop app**. No public domain or HTTPS
+   redirect URI is required; the helper uses `http://127.0.0.1:8085/` locally.
+4. On your computer, install Node.js 24+, clone this repository, then run
+  `npm ci` in the repository root. Put the Desktop app's
+   `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in a local `.env` file (or set
+   them in the shell). Run `node --env-file=.env google-oauth.js`.
+5. Open the printed Google authorization link in a browser on the same computer
+   and approve access. The helper listens only on `127.0.0.1`, uses state and
+   PKCE, and times out after five minutes. On success, it prints a
+   `GOOGLE_REFRESH_TOKEN=...` line in the terminal.
+6. Copy that token into the Portainer stack's `GOOGLE_REFRESH_TOKEN` environment
+   variable and deploy/restart the stack. Keep the token private; do not commit it
+   or put it in a public log. The token is not automatically transferred from
+   your computer to Portainer.
 
-The callback response completes authorization directly, so no polling is needed.
-The Google account must have write access to the target calendar. The requested
-scope is `calendar.events`. Existing deployments may keep using
-`GOOGLE_REFRESH_TOKEN` as an override; otherwise the saved token is reused after
-container restarts. To force authorization again, remove the saved token file
-from the persistent volume and restart the stack.
-
-For local CLI testing without the Portainer Compose stack, omit
-`GOOGLE_OAUTH_REDIRECT_URI`; the default is `http://127.0.0.1:8085/`. Register
-that exact loopback URI in the Google Web application client and run the sync on
-the same machine as the browser. Google requires HTTPS for non-loopback redirect
-addresses. A redirect mismatch usually means the configured URI differs from
-the URI registered in Google Cloud.
+The sync container uses that refresh token to renew Google access tokens. The
+Google account must have write access to the target calendar. The requested
+scope is `calendar.events`. If the token expires or access is revoked, run the
+local helper again and replace `GOOGLE_REFRESH_TOKEN` in Portainer.
 
 Alternatively use a service account: share the target calendar with its email
 and give it permission to make changes to events. Supply credentials with
@@ -57,19 +45,19 @@ and give it permission to make changes to events. Supply credentials with
 
 ## Environment and commands
 
-Copy `.env.example` to `.env` and fill in the values. Docker Compose uses `.env`
-for interpolation and maps configured values into the container; Portainer users
-should set the same variables in the stack environment. Running Node directly
-requires exporting variables or `node --env-file=.env`. Passwords and Google
-credentials are never printed or saved in SQLite. The refresh token is stored
-with mode `0600` in the persistent token file.
+Copy `.env.example` to a local `.env` for running the OAuth helper. Portainer
+stack variables must be entered in Portainer and are explicitly passed through
+the Compose `environment` section. The helper prints the refresh token once so
+you can paste it into Portainer; it does not save it to the repository. Never
+commit `.env` or share the refresh token.
 
 Required:
 
 - `SCHULMANAGER_USERNAME`, `SCHULMANAGER_PASSWORD`
 - `GOOGLE_CALENDAR_ICAL_URL` or `GOOGLE_CALENDAR_ID`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_OAUTH_DOMAIN` and `GOOGLE_OAUTH_REDIRECT_URI` for Portainer deployments
+- `GOOGLE_REFRESH_TOKEN`: generated locally with `node google-oauth.js`, then
+  entered in Portainer.
 
 Optional:
 
@@ -85,17 +73,14 @@ Optional:
 - `SCHULMANAGER_STUDENT_ID`: explicit student; otherwise
   `SCHULMANAGER_STUDENT=1` chooses the first associated student.
 - `SCHULMANAGER_INSTITUTION_ID`, `SCHULMANAGER_BUNDLE_VERSION`.
-- `GOOGLE_REFRESH_TOKEN`: optional legacy/manual OAuth token; normally obtained
-  once through the callback and saved automatically.
-- The callback listener is internal on port `8085`; Caddy publishes only ports
-  `80` and `443` and stores certificates in its persistent volume.
-- `GOOGLE_TOKEN_PATH=./data/google-refresh-token.json`: saved refresh token path.
+- `GOOGLE_OAUTH_PORT=8085`: local loopback port used by `google-oauth.js`.
 - `SYNC_DB_PATH=./data/sync.sqlite` and
   `SYNC_SESSION_PATH=./data/schulmanager-session.json` outside Docker.
 - `SCHULMANAGER_IMAGE`: optional GHCR image override; unset uses a local build.
 
 ```bash
 npm ci
+node --env-file=.env google-oauth.js
 node --env-file=.env sync.js --weeks 26 --dry-run
 node --env-file=.env sync.js --weeks 26
 node --env-file=.env sync.js --daemon --hours 4 --weeks 26
