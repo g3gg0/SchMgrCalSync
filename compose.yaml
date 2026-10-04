@@ -2,8 +2,8 @@ services:
   schulmanager-sync:
     image: ghcr.io/g3gg0/schmgrcalsync:latest
     build: .
-    ports:
-      - "${GOOGLE_OAUTH_PORT:-8085}:${GOOGLE_OAUTH_PORT:-8085}"
+    expose:
+      - "8085"
     environment:
       SCHULMANAGER_USERNAME: ${SCHULMANAGER_USERNAME:?Set in Portainer stack environment}
       SCHULMANAGER_PASSWORD: ${SCHULMANAGER_PASSWORD:?Set in Portainer stack environment}
@@ -15,8 +15,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
-      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
-      GOOGLE_OAUTH_PORT: ${GOOGLE_OAUTH_PORT:-8085}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:?Set full HTTPS callback URL in Portainer}
+      GOOGLE_OAUTH_PORT: "8085"
       GOOGLE_TOKEN_PATH: /data/google-refresh-token.json
       SYNC_WEEKS: ${SYNC_WEEKS:-26}
       SYNC_HOURS: ${SYNC_HOURS:-4}
@@ -29,5 +29,21 @@ services:
     command: ["--daemon"]
     restart: unless-stopped
     init: true
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - schulmanager-sync
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      GOOGLE_OAUTH_DOMAIN: ${GOOGLE_OAUTH_DOMAIN:?Set the public DNS name in Portainer}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 volumes:
   sync-data:
+  caddy-data:
+  caddy-config:

@@ -16,18 +16,20 @@ For a headless Portainer/Docker deployment:
   add yourself as a test user. Google commonly expires Calendar refresh tokens
   after seven days for external apps in Testing; move to Production for ongoing
   unattended use. Personal-use apps may still show an unverified-app warning.
-3. Create an OAuth client of type **Web application**. Set its authorized redirect
-  URI to the exact value of `GOOGLE_OAUTH_REDIRECT_URI`, including protocol,
-  path, port (if any), and trailing slash. For example:
+3. Point a public DNS name (for example `sync.example.net`) to the Docker host.
+  Forward inbound TCP ports 80 and 443 through your router/firewall, and make
+  sure neither port is already in use.
+4. Create an OAuth client of type **Web application**. Set its authorized redirect
+  URI to the exact `GOOGLE_OAUTH_REDIRECT_URI`, including protocol, path, port
+  (if any), and trailing slash. For example:
   `https://sync.example.net/oauth/google/callback`.
-4. Configure a TLS reverse proxy to forward that path to the container's
-  `GOOGLE_OAUTH_PORT` (default `8085`). The proxy terminates HTTPS; the callback
-  server listens on HTTP inside the Docker network. Keep the callback port
-  reachable only through the proxy/firewall.
-5. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the complete
-  `GOOGLE_OAUTH_REDIRECT_URI` in the Portainer stack environment. The Compose
-  file explicitly passes these and the Schulmanager credentials into the
-  container; Portainer stack variables are not passed through automatically.
+5. Set `GOOGLE_OAUTH_DOMAIN`, `GOOGLE_OAUTH_REDIRECT_URI`, `GOOGLE_CLIENT_ID`,
+  and `GOOGLE_CLIENT_SECRET` in the Portainer stack environment. The Compose
+  stack includes Caddy: it obtains and renews the HTTPS certificate
+  automatically, terminates TLS, and proxies the callback internally to the
+  app's HTTP listener. The app's port is not published publicly. Compose also
+  explicitly passes the Schulmanager credentials; Portainer variables are not
+  passed into a container unless listed under `environment`.
 6. Start the stack. If no `GOOGLE_REFRESH_TOKEN` is supplied and no saved token
   exists, the container logs an authorization URL. Open it, approve access, and
   Google redirects to the configured callback. The container saves the refresh
@@ -41,11 +43,12 @@ scope is `calendar.events`. Existing deployments may keep using
 container restarts. To force authorization again, remove the saved token file
 from the persistent volume and restart the stack.
 
-For local use without a public reverse proxy, omit `GOOGLE_OAUTH_REDIRECT_URI`;
-the default is `http://127.0.0.1:8085/`. Register that exact loopback URI in the
-Google Web application client and run the sync on the same machine as the browser.
-Google requires HTTPS for non-loopback redirect addresses. A redirect mismatch
-usually means the configured URI differs from the URI registered in Google Cloud.
+For local CLI testing without the Portainer Compose stack, omit
+`GOOGLE_OAUTH_REDIRECT_URI`; the default is `http://127.0.0.1:8085/`. Register
+that exact loopback URI in the Google Web application client and run the sync on
+the same machine as the browser. Google requires HTTPS for non-loopback redirect
+addresses. A redirect mismatch usually means the configured URI differs from
+the URI registered in Google Cloud.
 
 Alternatively use a service account: share the target calendar with its email
 and give it permission to make changes to events. Supply credentials with
@@ -66,7 +69,7 @@ Required:
 - `SCHULMANAGER_USERNAME`, `SCHULMANAGER_PASSWORD`
 - `GOOGLE_CALENDAR_ICAL_URL` or `GOOGLE_CALENDAR_ID`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REDIRECT_URI` for remote Docker/Portainer deployments
+- `GOOGLE_OAUTH_DOMAIN` and `GOOGLE_OAUTH_REDIRECT_URI` for Portainer deployments
 
 Optional:
 
@@ -84,7 +87,8 @@ Optional:
 - `SCHULMANAGER_INSTITUTION_ID`, `SCHULMANAGER_BUNDLE_VERSION`.
 - `GOOGLE_REFRESH_TOKEN`: optional legacy/manual OAuth token; normally obtained
   once through the callback and saved automatically.
-- `GOOGLE_OAUTH_PORT=8085`: callback listener port; publish/proxy this port.
+- The callback listener is internal on port `8085`; Caddy publishes only ports
+  `80` and `443` and stores certificates in its persistent volume.
 - `GOOGLE_TOKEN_PATH=./data/google-refresh-token.json`: saved refresh token path.
 - `SYNC_DB_PATH=./data/sync.sqlite` and
   `SYNC_SESSION_PATH=./data/schulmanager-session.json` outside Docker.
