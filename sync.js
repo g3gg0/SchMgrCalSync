@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { SchulmanagerClient, selectStudent, studentsFromUser, addDays } from './client.js';
 import { saveSession } from './session.js';
 import { googleAuth, GoogleCalendar } from './google-calendar.js';
-import { calendarIdFromUrl, scopeId, openDatabase, reconcile, nextRun } from './sync-core.js';
+import { calendarIdFromUrl, scopeId, openDatabase, reconcile, nextRun, sickEvent, exemptionEvent } from './sync-core.js';
 
 function integer(value, name, min, max) {
   const n = Number(value);
@@ -37,12 +37,32 @@ export function configuration(env, values) {
     studentIndex: env.SCHULMANAGER_STUDENT_ID ? undefined : integer(env.SCHULMANAGER_STUDENT ?? 1, 'Student index', 1, 1000) };
 }
 export function telegramMessage({ studentId, start, end, stats }) {
-  const changes = [];
-  if (stats.created) changes.push(`Neu: ${stats.created}`);
-  if (stats.updated) changes.push(`Geändert: ${stats.updated}`);
-  if (stats.deleted) changes.push(`Entfernt: ${stats.deleted}`);
-  if (!changes.length) return null;
-  return ['Schulmanager-Kalender synchronisiert', `Schüler-ID: ${studentId}`, `Zeitraum: ${start} bis ${end}`, ...changes].join('\n');
+  if (!stats.created && !stats.updated && !stats.deleted) return null;
+  const formatDate = value => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''));
+    return match ? `${match[3]}.${match[2]}.${match[1]}` : String(value ?? 'Datum unbekannt');
+  };
+  const lines = [
+    '📚 Schulmanager-Kalender aktualisiert',
+    `Schüler-ID: ${studentId}`,
+    `Zeitraum: ${formatDate(start)} – ${formatDate(end)}`
+  ];
+  const sections = [
+    { count: stats.created, title: '➕ Hinzugefügt', events: stats.changes?.created ?? [] },
+    { count: stats.deleted, title: '➖ Gelöscht', events: stats.changes?.deleted ?? [] }
+  ];
+  for (const section of sections) {
+    if (!section.count) continue;
+    lines.push('', `${section.title} (${section.count})`);
+    if (!section.events.length) lines.push('• Details nicht verfügbar');
+    else for (const event of section.events) lines.push(`• ${formatDate(event.date)} · ${event.summary}`);
+  }
+  if (stats.updated) lines.push('', `✏️ Geändert: ${stats.updated}`);
+  let text = lines.join('\n');
+  if (text.length > 3900) {
+    text = `${text.slice(0, 3850).replace(/\n[^\n]*$/, '')}\n… Weitere Details wegen der Telegram-Nachrichtenlänge gekürzt.`;
+  }
+  return text;
 }
 export async function sendTelegramUpdate(env, summary, fetchImpl = fetch) {
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
@@ -74,6 +94,18 @@ export function hasGoogleAuth(env) {
   const hasOAuthCredentials = env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REFRESH_TOKEN;
   return Boolean(hasOAuthCredentials || env.GOOGLE_SERVICE_ACCOUNT_JSON || env.GOOGLE_APPLICATION_CREDENTIALS);
 }
+export function recordsForStudentRange(records, studentId, start, end) {
+  if (!Array.isArray(records)) throw new Error('Invalid absence response; no calendar events changed.');
+  return records.filter(record => {
+    if (String(record.studentId) !== String(studentId)) return false;
+    const startDate = record.startDate?.slice(0, 10);
+    const endDate = (record.endDate ?? record.startDate)?.slice(0, 10);
+    addDays(startDate ?? '', 0);
+    addDays(endDate ?? '', 0);
+    if (endDate < startDate) throw new Error('Absence record ends before it starts; no calendar events changed.');
+    return startDate <= end && endDate >= start;
+  });
+}
 function waitForShutdown() {
   return new Promise(resolve => {
     const shutdown = () => {
@@ -95,18 +127,54 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
   const student = selectStudent(students, { id: config.studentId, index: config.studentIndex });
   const start = new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format();
   const end = addDays(start, config.weeks * 7);
-  const result = (await client.callRequests([{ moduleName: 'exams', endpointName: 'get-exams', parameters: { student, start, end } }]))[0];
-  if (Number(result.status) >= 400 || !Array.isArray(result.data)) throw new Error(`Schulmanager exam fetch failed (${result.status ?? 'invalid response'}); no calendar events changed.`);
+  const exemptionRequest = {
+    moduleName: 'exemptions',
+    endpointName: 'poqa',
+    parameters: { action: { model: 'modules/exemptions/exemption-request', action: 'findAll', parameters: [{
+      where: { studentId: student.id, isInternal: { $not: true } },
+      include: [{ association: 'student', required: true }]
+    }] }, uiState: 'main.modules.exemptions.request' }
+  };
+  const [examResult, sickResult, exemptionResult] = await client.callRequests([
+    { moduleName: 'exams', endpointName: 'get-exams', parameters: { student, start, end } },
+    { moduleName: 'sick', endpointName: 'get-sick-notes-as-student-fully-entitled' },
+    exemptionRequest
+  ]);
+  const requireRecords = (result, section) => {
+    if (Number(result.status) >= 400 || !Array.isArray(result.data)) {
+      throw new Error(`Schulmanager ${section} fetch failed (${result.status ?? 'invalid response'}); no calendar events changed.`);
+    }
+    return result.data;
+  };
+  const exams = requireRecords(examResult, 'exam');
+  const sickNotes = recordsForStudentRange(requireRecords(sickResult, 'sick notes'), student.id, start, end);
+  const exemptions = recordsForStudentRange(requireRecords(exemptionResult, 'exemptions'), student.id, start, end)
+    .filter(record => record.isInternal !== true);
   const institution = client.user.institutionId;
   if (!Number.isSafeInteger(institution) || institution <= 0) throw new Error('Login has no institution ID; refusing unscoped sync.');
-  const scope = scopeId(institution, student.id, config.calendarId);
-  const stats = await reconcile({ db, calendar, exams: result.data, student, scope, start, end,
-    prefixStudentName: shouldPrefixStudentName(students.length, config.prefixStudentName), remindDays: config.remindDays, dryRun });
+  const sources = [
+    { scope: scopeId(institution, student.id, config.calendarId), records: exams,
+      prefixStudentName: shouldPrefixStudentName(students.length, config.prefixStudentName), remindDays: config.remindDays },
+    { scope: scopeId(institution, student.id, config.calendarId, 'sick'), records: sickNotes,
+      eventFactory: sickEvent, identityProperty: 'smSickId' },
+    { scope: scopeId(institution, student.id, config.calendarId, 'exemptions'), records: exemptions,
+      eventFactory: exemptionEvent, identityProperty: 'smExemptionId' }
+  ];
+  const stats = { created: 0, updated: 0, deleted: 0, unchanged: 0, dryRun,
+    changes: { created: [], updated: [], deleted: [] } };
+  for (const source of sources) {
+    const result = await reconcile({ db, calendar, exams: source.records, student, scope: source.scope, start, end,
+      eventFactory: source.eventFactory, identityProperty: source.identityProperty,
+      prefixStudentName: source.prefixStudentName, remindDays: source.remindDays, dryRun });
+    for (const key of ['created', 'updated', 'deleted', 'unchanged']) stats[key] += result[key];
+    for (const key of ['created', 'updated', 'deleted']) stats.changes[key].push(...result.changes[key]);
+  }
   if (!dryRun && config.telegramBotToken && stats.created + stats.updated + stats.deleted > 0) {
     try { await sendTelegramUpdate(env, { studentId: student.id, start, end, stats }); }
     catch (error) { console.error(`Telegram notification failed: ${error.message}`); }
   }
-  console.log(JSON.stringify({ time: new Date().toISOString(), studentId: student.id, start, end, exams: result.data.length, ...stats }));
+  console.log(JSON.stringify({ time: new Date().toISOString(), studentId: student.id, start, end,
+    exams: exams.length, sickNotes: sickNotes.length, exemptions: exemptions.length, ...stats }));
   return stats;
 }
 export async function main() {

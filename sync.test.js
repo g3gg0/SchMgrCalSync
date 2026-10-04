@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent } from './sync-core.js';
+import { calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent, sickEvent, exemptionEvent } from './sync-core.js';
 import { GoogleCalendar } from './google-calendar.js';
 import { getOAuthCredentials, oauthSettings } from './google-oauth.js';
-import { configuration, hasGoogleAuth, sendTelegramUpdate, shouldPrefixStudentName, telegramMessage } from './sync.js';
+import { configuration, hasGoogleAuth, recordsForStudentRange, sendTelegramUpdate, shouldPrefixStudentName, telegramMessage } from './sync.js';
 const student = { id: 12, classId: 34 };
 const scope = scopeId(56, student.id, 'test-calendar');
 const exam = { id: 78, date: '2026-10-14', subject: { name: 'Math' }, type: { name: 'Test' }, comment: 'Chapters 1–2' };
@@ -35,7 +35,9 @@ test('stable IDs, repeat sync, edit correction, deletion and unrelated events', 
     assert.equal((await reconcile({ db, calendar, exams: [exam], ...context })).unchanged, 1);
     calendar.remote.get(id).summary = 'Manually changed';
     assert.equal((await reconcile({ db, calendar, exams: [exam], ...context })).updated, 1);
-    assert.equal((await reconcile({ db, calendar, exams: [], ...context })).deleted, 1);
+    const deletion = await reconcile({ db, calendar, exams: [], ...context });
+    assert.equal(deletion.deleted, 1);
+    assert.deepEqual(deletion.changes.deleted, [{ date: '2026-10-14', summary: 'Math – Test' }]);
     assert.ok(calendar.remote.has('unrelated'));
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM exams').get().n, 0);
   } finally { db.close(); }
@@ -65,9 +67,55 @@ test('changing event reminder settings updates its existing calendar entry', asy
       { useDefault: false, overrides: [{ method: 'popup', minutes: 2880 }] });
   } finally { db.close(); }
 });
+test('sick notes and exemptions create reminder-free all-day events with stable status', () => {
+  const sick = sickEvent({ id: 81, studentId: student.id, startDate: '2026-10-14', endDate: '2026-10-16' },
+    scopeId(56, student.id, 'test-calendar', 'sick'), student);
+  assert.equal(sick.summary, 'Krankmeldung');
+  assert.deepEqual(sick.start, { date: '2026-10-14' });
+  assert.deepEqual(sick.end, { date: '2026-10-17' });
+  assert.deepEqual(sick.reminders, { useDefault: false, overrides: [] });
+  const exemptionScope = scopeId(56, student.id, 'test-calendar', 'exemptions');
+  const request = { id: 82, studentId: student.id, startDate: '2026-10-20', endDate: '2026-10-21', granted: false };
+  const pending = exemptionEvent(request, exemptionScope, student);
+  const approved = exemptionEvent({ ...request, granted: true }, exemptionScope, student);
+  assert.equal(pending.summary, 'Beurlaubung – Nicht genehmigt');
+  assert.equal(approved.summary, 'Beurlaubung – Genehmigt');
+  assert.equal(pending.id, approved.id);
+  assert.deepEqual(approved.reminders, { useDefault: false, overrides: [] });
+});
+test('absence reconciliation updates a Beurlaubung when granted status changes', async () => {
+  const db = openDatabase(':memory:');
+  const calendar = fakeCalendar();
+  const exemptionScope = scopeId(56, student.id, 'test-calendar', 'exemptions');
+  const request = { id: 83, studentId: student.id, startDate: '2026-10-20', endDate: '2026-10-20', granted: false };
+  try {
+    assert.equal((await reconcile({ db, calendar, exams: [request], student, scope: exemptionScope,
+      start: context.start, end: context.end, eventFactory: exemptionEvent, identityProperty: 'smExemptionId' })).created, 1);
+    const updated = await reconcile({ db, calendar, exams: [{ ...request, granted: true }], student, scope: exemptionScope,
+      start: context.start, end: context.end, eventFactory: exemptionEvent, identityProperty: 'smExemptionId' });
+    assert.equal(updated.updated, 1);
+    assert.equal(calendar.remote.values().next().value.summary, 'Beurlaubung – Genehmigt');
+  } finally { db.close(); }
+});
+test('absence records are filtered to selected student and overlapping date range', () => {
+  const records = [
+    { id: 1, studentId: student.id, startDate: '2026-09-30', endDate: '2026-10-05' },
+    { id: 2, studentId: student.id, startDate: '2027-04-05', endDate: '2027-04-06' },
+    { id: 3, studentId: 999, startDate: '2026-10-10', endDate: '2026-10-10' }
+  ];
+  assert.deepEqual(recordsForStudentRange(records, student.id, context.start, context.end).map(record => record.id), [1]);
+  assert.throws(() => recordsForStudentRange([{ studentId: student.id }], student.id, context.start, context.end), /Invalid date/);
+});
 test('Telegram reports actual calendar changes and ignores unchanged cycles', async () => {
   const env = { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_CHAT_ID: '1234' };
-  const summary = { studentId: 12, start: '2026-10-04', end: '2027-04-04', stats: { created: 2, updated: 1, deleted: 0 } };
+  const summary = { studentId: 12, start: '2026-10-04', end: '2027-04-04', stats: {
+    created: 1, updated: 1, deleted: 1,
+    changes: {
+      created: [{ date: '2026-10-14', summary: 'Werken - Kurztest' }],
+      updated: [],
+      deleted: [{ date: '2026-10-22', summary: 'Mathematik' }]
+    }
+  } };
   let requestUrl;
   let requestBody;
   const sent = await sendTelegramUpdate(env, summary, async (url, options) => {
@@ -78,8 +126,9 @@ test('Telegram reports actual calendar changes and ignores unchanged cycles', as
   assert.equal(sent, true);
   assert.match(requestUrl, /api\.telegram\.org\/bottest-token\/sendMessage/);
   assert.equal(requestBody.chat_id, '1234');
-  assert.match(requestBody.text, /Neu: 2/);
-  assert.match(requestBody.text, /Geändert: 1/);
+  assert.match(requestBody.text, /➕ Hinzugefügt \(1\)\n• 14\.10\.2026 · Werken - Kurztest/);
+  assert.match(requestBody.text, /➖ Gelöscht \(1\)\n• 22\.10\.2026 · Mathematik/);
+  assert.match(requestBody.text, /✏️ Geändert: 1/);
   assert.equal(telegramMessage({ ...summary, stats: { created: 0, updated: 0, deleted: 0 } }), null);
   assert.equal(await sendTelegramUpdate(env, { ...summary, stats: { created: 0, updated: 0, deleted: 0 } }), false);
   await assert.rejects(sendTelegramUpdate({ TELEGRAM_BOT_TOKEN: 'token' }, summary), /Set both/);

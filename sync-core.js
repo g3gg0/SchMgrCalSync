@@ -8,8 +8,9 @@ export function calendarIdFromUrl(value) {
   if (url.protocol !== 'https:' || url.hostname !== 'calendar.google.com' || !match) throw new Error('Expected a Google private iCal URL.');
   return decodeURIComponent(match[1]);
 }
-export function scopeId(institutionId, studentId, calendarId) {
-  return createHash('sha256').update(JSON.stringify(['schulmanager-exams-v1', institutionId, studentId, calendarId])).digest('hex');
+export function scopeId(institutionId, studentId, calendarId, sourceType = 'exams') {
+  const namespace = sourceType === 'exams' ? 'schulmanager-exams-v1' : `schulmanager-${sourceType}-v1`;
+  return createHash('sha256').update(JSON.stringify([namespace, institutionId, studentId, calendarId])).digest('hex');
 }
 function remindersForDays(days) {
   if (days == null) return { useDefault: true };
@@ -41,6 +42,28 @@ export function examEvent(exam, scope, student, { prefixStudentName = false, rem
     extendedProperties: { private: { smScope: scope, smExamId: String(exam.id), smStudentId: String(student.id) } }
   };
 }
+function absenceEvent(record, scope, student, type) {
+  if (!Number.isSafeInteger(record.id) || record.id <= 0) throw new Error(`${type} record has no stable numeric ID.`);
+  const startDate = record.startDate?.slice(0, 10);
+  const lastDate = (record.endDate ?? record.startDate)?.slice(0, 10);
+  addDays(startDate ?? '', 0);
+  addDays(lastDate ?? '', 0);
+  if (lastDate < startDate) throw new Error(`${type} record ends before it starts.`);
+  const isExemption = type === 'exemption';
+  const status = record.granted === true ? 'Genehmigt' : 'Nicht genehmigt';
+  const idProperty = isExemption ? 'smExemptionId' : 'smSickId';
+  return {
+    id: `sm${createHash('sha256').update(`${scope}:${type}:${record.id}`).digest('hex')}`,
+    summary: isExemption ? `Beurlaubung – ${status}` : 'Krankmeldung',
+    description: [`Schulmanager ${type} ${record.id}; student ${student.id}`,
+      ...(isExemption ? [`Status: ${status}`] : []), 'Managed by schulmanager-sync (one-way).'].join('\n'),
+    start: { date: startDate }, end: { date: addDays(lastDate, 1) },
+    reminders: { useDefault: false, overrides: [] },
+    extendedProperties: { private: { smScope: scope, [idProperty]: String(record.id), smStudentId: String(student.id) } }
+  };
+}
+export function sickEvent(record, scope, student) { return absenceEvent(record, scope, student, 'sick'); }
+export function exemptionEvent(record, scope, student) { return absenceEvent(record, scope, student, 'exemption'); }
 export function nextRun(now, hours, timezone = 'Europe/Berlin') {
   if (!Number.isInteger(hours) || hours < 1 || hours > 24) throw new Error('Hours must be 1..24.');
   const formatter = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -66,15 +89,20 @@ function sameEvent(remote, desired) {
     JSON.stringify(normalizedReminders(remote.reminders)) === JSON.stringify(normalizedReminders(desired.reminders)) &&
     Object.entries(desired.extendedProperties.private).every(([k,v]) => remote.extendedProperties?.private?.[k] === v);
 }
+function eventDetails(event, date = event.start?.date) {
+  return { date, summary: event.summary ?? 'Prüfung' };
+}
 
-export async function reconcile({ db, calendar, exams, student, scope, start, end, prefixStudentName = false, remindDays = null, dryRun = false }) {
-  if (!Array.isArray(exams)) throw new Error('Invalid exams response; no calendar mutations performed.');
+export async function reconcile({ db, calendar, exams, student, scope, start, end, prefixStudentName = false, remindDays = null,
+  eventFactory = examEvent, identityProperty = 'smExamId', dryRun = false }) {
+  if (!Array.isArray(exams)) throw new Error('Invalid source snapshot; no calendar mutations performed.');
   const desired = new Map();
-  for (const exam of exams) {
-    const event = examEvent(exam, scope, student, { prefixStudentName, remindDays });
-    if (event.start.date < start || event.start.date > end) throw new Error('Exam outside requested range; refusing incomplete source snapshot.');
-    if (desired.has(event.id) && JSON.stringify(desired.get(event.id).event) !== JSON.stringify(event)) throw new Error('Conflicting duplicate exam ID.');
-    desired.set(event.id, { event, exam });
+  for (const record of exams) {
+    const event = eventFactory(record, scope, student, { prefixStudentName, remindDays });
+    const eventLastDate = addDays(event.end.date, -1);
+    if (event.start.date > end || eventLastDate < start) throw new Error('Event outside requested range; refusing incomplete source snapshot.');
+    if (desired.has(event.id) && JSON.stringify(desired.get(event.id).event) !== JSON.stringify(event)) throw new Error('Conflicting duplicate source ID.');
+    desired.set(event.id, { event, record });
   }
   // Hold a SQLite writer lock throughout reconciliation; another process cannot
   // run a competing cycle against this DB. Google operations are recoverable by IDs.
@@ -87,35 +115,43 @@ export async function reconcile({ db, calendar, exams, student, scope, start, en
     const owned = remote.filter(e => e.extendedProperties?.private?.smScope === scope);
     const existing = new Map(owned.map(e => [e.id, e]));
     const keptIds = new Set();
-    const stats = { created: 0, updated: 0, deleted: 0, unchanged: 0, dryRun };
-    for (const { event, exam } of desired.values()) {
-      const row = stored.find(row => row.exam_id === String(exam.id));
-      const found = (row && existing.get(row.google_id)) ?? existing.get(event.id) ?? owned.find(e => e.extendedProperties?.private?.smExamId === String(exam.id));
+    const stats = { created: 0, updated: 0, deleted: 0, unchanged: 0, dryRun,
+      changes: { created: [], updated: [], deleted: [] } };
+    for (const { event, record } of desired.values()) {
+      const recordId = String(record.id);
+      const row = stored.find(row => row.exam_id === recordId);
+      const found = (row && existing.get(row.google_id)) ?? existing.get(event.id) ?? owned.find(e => e.extendedProperties?.private?.[identityProperty] === recordId);
       if (found) event.id = found.id;
       if (!dryRun) db.prepare(`INSERT INTO exams(scope,exam_id,google_id,exam_date,source_json) VALUES(?,?,?,?,?)
-        ON CONFLICT(scope,exam_id) DO UPDATE SET google_id=excluded.google_id,exam_date=excluded.exam_date,source_json=excluded.source_json`).run(scope, String(exam.id), event.id, event.start.date, JSON.stringify(exam));
+        ON CONFLICT(scope,exam_id) DO UPDATE SET google_id=excluded.google_id,exam_date=excluded.exam_date,source_json=excluded.source_json`).run(scope, recordId, event.id, event.start.date, JSON.stringify(record));
       if (!found) {
         if (!dryRun) {
           const created = await calendar.upsert(event, scope);
           if (created?.id) event.id = created.id;
-          db.prepare('UPDATE exams SET google_id=? WHERE scope=? AND exam_id=?').run(event.id, scope, String(exam.id));
+          db.prepare('UPDATE exams SET google_id=? WHERE scope=? AND exam_id=?').run(event.id, scope, recordId);
         }
         stats.created++;
+        stats.changes.created.push(eventDetails(event));
       }
-      else if (!sameEvent(found, event)) { if (!dryRun) await calendar.update(event); stats.updated++; }
+      else if (!sameEvent(found, event)) {
+        if (!dryRun) await calendar.update(event);
+        stats.updated++;
+        stats.changes.updated.push(eventDetails(event));
+      }
       else stats.unchanged++;
       keptIds.add(event.id);
-      if (!dryRun) db.prepare('UPDATE exams SET synced_at=? WHERE scope=? AND exam_id=?').run(new Date().toISOString(), scope, String(exam.id));
+      if (!dryRun) db.prepare('UPDATE exams SET synced_at=? WHERE scope=? AND exam_id=?').run(new Date().toISOString(), scope, recordId);
     }
     for (const event of owned) {
       const date = tracked.get(event.id)?.exam_date ?? event.start?.date ?? event.start?.dateTime?.slice(0,10);
       if (!keptIds.has(event.id) && date >= start && date <= end) {
         if (!dryRun) await calendar.remove(event.id);
         stats.deleted++;
+        stats.changes.deleted.push(eventDetails(event, date));
       }
     }
     if (!dryRun) {
-      const examIds = new Set([...desired.values()].map(value => String(value.exam.id)));
+      const examIds = new Set([...desired.values()].map(value => String(value.record.id)));
       for (const row of stored) if (!examIds.has(row.exam_id) && row.exam_date >= start && row.exam_date <= end) db.prepare('DELETE FROM exams WHERE scope=? AND exam_id=?').run(scope, row.exam_id);
       db.prepare('INSERT OR REPLACE INTO sync_runs VALUES(?,?,?,?)').run(scope, start, end, new Date().toISOString());
     }

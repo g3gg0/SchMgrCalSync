@@ -39,6 +39,13 @@ local helper again and replace `GOOGLE_REFRESH_TOKEN` in Portainer. If Google
 auth values are missing, the daemon prints the local command and stays idle
 without repeated failures until the stack is redeployed with credentials.
 
+The sync also imports the selected student's sick notes and non-internal
+exemption requests when their dates overlap the sync horizon. Sick notes become
+all-day `Krankmeldung` events. Exemptions become all-day `Beurlaubung` events;
+`granted=true` is shown as `Genehmigt`, otherwise as `Nicht genehmigt`. A later
+approval-state change updates the existing event. These absence events never
+receive the `SYNC_REMIND_DAYS` popup reminder.
+
 Alternatively use a service account: share the target calendar with its email
 and give it permission to make changes to events. Supply credentials with
 `GOOGLE_SERVICE_ACCOUNT_JSON` or mount its JSON key and set
@@ -67,13 +74,14 @@ Optional:
 - `SYNC_TIMEZONE=Europe/Berlin`: dates and daemon scheduling timezone.
 - `SYNC_REMIND_DAYS=3`: optional Google Calendar popup reminder before each
   synced exam; valid range is 1 to 28 days. If unset, the calendar's default
-  reminders apply. Changing this value updates existing upcoming managed events
-  on the next sync.
+  reminders apply to exams. Changing this value updates existing upcoming exam
+  events on the next sync. Sick notes and exemptions have no reminders.
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`: optional pair. The bot sends one
   message after a successful sync only when events were created, updated, or
-  deleted. No message is sent for unchanged cycles or dry runs. Start a chat with
-  the bot and ensure it can message the configured chat. Telegram failures are
-  logged but do not roll back calendar changes.
+  deleted. Added and deleted entries are listed with date and title; updates are
+  shown as a count. No message is sent for unchanged cycles or dry runs. Start a
+  chat with the bot and ensure it can message the configured chat. Telegram
+  failures are logged but do not roll back calendar changes.
 - `SYNC_PREFIX_STUDENT_NAME=true`: prefix exam titles with the selected student's
   first name even when the account has only one associated student. If the
   Schulmanager account has multiple associated students, the selected student's
