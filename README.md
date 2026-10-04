@@ -1,8 +1,55 @@
-# Schulmanager CLI
+# Schulmanager Calendar Sync
 
-The original CLI requires Node.js 22+. Calendar sync requires Node.js 24+ and
-`npm ci` for Google's authentication library. See [SYNC.md](SYNC.md) for Docker,
-environment variables, one-time OAuth authorization and the foreground daemon.
+Unofficial one-way sync from Schulmanager to Google Calendar. The Docker image
+is intended to run continuously from Portainer; the command-line tools below are
+optional utilities for setup and troubleshooting.
+
+The sync manages:
+
+- Exams, with class-hour number in the title, lesson start/end times in Google
+    Calendar, and source creation/update timestamps in the description.
+- One-time and daily/weekly recurring entries from the Schulmanager calendar.
+- The selected student's sick notes and non-internal exemption requests; changed
+    exemption approval status updates the existing calendar entry.
+- Optional exam popup reminders (`SYNC_REMIND_DAYS`) and Telegram notifications
+    when entries are added, changed, or removed.
+
+Calendar, sick-note, and exemption events do not receive reminders. See
+[SYNC.md](SYNC.md) for Portainer setup, local OAuth authorization, configuration,
+recurrence limits, and troubleshooting.
+
+## Quick Start
+
+1. Create a Google Cloud project, enable the Google Calendar API, configure the
+    consent screen, and create an OAuth client of type **Web application** with
+    the localhost redirect URI described in [the setup guide](doc/Install.md).
+2. On your private computer, clone this repository, install Node.js 24+, run
+   `npm ci`, then run `npm run google-oauth`. Enter the OAuth client ID and
+   secret when prompted, approve the link in a browser on that computer, and
+   copy the resulting refresh token.
+3. Deploy `compose.yaml` as a Portainer stack. Set the Schulmanager credentials,
+   Google calendar ID (or private iCal URL), OAuth client ID/secret, and the
+   generated `GOOGLE_REFRESH_TOKEN` in the stack environment.
+
+The GHCR image is `ghcr.io/g3gg0/schmgrcalsync:latest`. OAuth runs locally
+during setup; the sync container needs no public callback, reverse proxy, or
+inbound port. See [doc/Install.md](doc/Install.md) for illustrated Google Cloud
+setup steps.
+
+## Use and Responsibility
+
+This project uses private, undocumented Schulmanager API endpoints. They may
+change or be restricted, and automated access may be subject to Schulmanager,
+school, Google, or other applicable terms and policies. Before using it, you
+must verify that you are authorized to access and synchronize this data and
+comply with all applicable rules. Use is at your own risk. The authors provide
+the software as-is, without warranty, and accept no responsibility for account
+restrictions, data loss, or other consequences, to the extent permitted by law.
+
+## Additional CLI Tools
+
+The original information-fetching CLI requires Node.js 22+. Calendar sync and
+the Google authorization helper require Node.js 24+ and `npm ci`.
 
 Commands:
 
@@ -103,10 +150,8 @@ Modules with no captured request are reported as UNSUPPORTED; capture their
 pages to add verified read endpoints. Some board/conference data is already
 available through main account widget endpoints rather than module endpoints.
 
-Eight automated tests pass. A live test-modules attempt in the agent session
-stopped before network access because no usable cached login/environment
-credentials were available. Run probes in the logged-in WSL session to verify
-current server responses.
+`npm test` runs the automated test suite. It uses mocked API responses and does
+not validate current live Schulmanager responses; the private API may change.
 
 ## GitHub Container Registry
 

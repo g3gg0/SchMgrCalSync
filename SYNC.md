@@ -1,7 +1,15 @@
-# Exam sync to Google Calendar
+# Schulmanager Calendar Sync
 
-One-way: Schulmanager → Google. Node.js 24+ and `npm ci` are required for sync
+Unofficial one-way sync from Schulmanager to Google Calendar. Node.js 24+ and `npm ci` are required for sync
 (the original CLI still runs on Node 22). SQLite uses Node's built-in driver.
+
+This project uses private, undocumented Schulmanager API endpoints. They may
+change or be restricted, and automated access may be subject to Schulmanager,
+school, Google, or other applicable terms and policies. Before using this tool,
+verify that you are authorized to access and synchronize the data and comply
+with all applicable rules. Use is at your own risk. The authors provide the
+software as-is, without warranty, and accept no responsibility for account
+restrictions, data loss, or other consequences, to the extent permitted by law.
 
 ## Google authorization
 
@@ -18,8 +26,10 @@ HTTPS endpoint, reverse proxy, or inbound port.
   add yourself as a test user. Google commonly expires Calendar refresh tokens
   after seven days for external apps in Testing; move to Production for ongoing
   unattended use. Personal-use apps may still show an unverified-app warning.
-3. Create an OAuth client of type **Desktop app**. No public domain or HTTPS
-   redirect URI is required; the helper uses `http://127.0.0.1:8085/` locally.
+3. Create an OAuth client of type **Web application** and register the exact
+  local redirect URI `http://127.0.0.1:8085/`. See [doc/Install.md](doc/Install.md)
+  for the illustrated Google Cloud setup. No public domain or HTTPS endpoint
+  is used; the helper listens only on localhost.
 4. On your computer, install Node.js 24+, clone this repository, then run
   `npm ci` in the repository root. Run `npm run google-oauth`; it asks for the
   OAuth Client ID and Client Secret (the secret input is hidden).
