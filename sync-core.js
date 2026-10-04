@@ -24,7 +24,7 @@ function normalizedReminders(reminders) {
     .sort((first, second) => first.minutes - second.minutes || first.method.localeCompare(second.method));
   return { useDefault: false, overrides };
 }
-export function examEvent(exam, scope, student, { prefixStudentName = false, remindDays = null } = {}) {
+export function examEvent(exam, scope, student, { prefixStudentName = false, remindDays = null, timeZone = 'Europe/Berlin' } = {}) {
   if (!Number.isSafeInteger(exam.id) || exam.id <= 0) throw new Error('Exam has no stable numeric ID; refusing incomplete source snapshot.');
   const date = exam.date?.slice(0, 10);
   addDays(date ?? '', 0);
@@ -33,6 +33,11 @@ export function examEvent(exam, scope, student, { prefixStudentName = false, rem
   const namePrefix = prefixStudentName && student.firstname ? `${student.firstname} - ` : '';
   const classHour = classHourDetails(exam.startClassHour, exam.endClassHour);
   const summary = `${namePrefix}${labels.join(namePrefix ? ' - ' : ' – ')}${classHour ? ` (${classHour})` : ''}`;
+  const startTime = exam.startClassHour?.from;
+  const endTime = exam.endClassHour?.until ?? exam.startClassHour?.until;
+  const hasClassTime = startTime != null || endTime != null;
+  const validTime = value => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(value);
+  if (hasClassTime && (!validTime(startTime) || !validTime(endTime))) throw new Error('Exam has invalid class-hour start/end times.');
   const timestamps = [
     exam.createdAt ? `Erstellt: ${formatTimestamp(exam.createdAt)}` : null,
     exam.updatedAt ? `Aktualisiert: ${formatTimestamp(exam.updatedAt)}` : null
@@ -41,7 +46,8 @@ export function examEvent(exam, scope, student, { prefixStudentName = false, rem
     id: `sm${createHash('sha256').update(`${scope}:${exam.id}`).digest('hex')}`,
     summary,
     description: [exam.comment, ...timestamps, `Schulmanager exam ${exam.id}; student ${student.id}`, 'Managed by schulmanager-sync (one-way).'].filter(Boolean).join('\n'),
-    start: { date }, end: { date: addDays(date, 1) },
+    start: hasClassTime ? { dateTime: `${date}T${startTime}`, timeZone } : { date },
+    end: hasClassTime ? { dateTime: `${date}T${endTime}`, timeZone } : { date: addDays(date, 1) },
     reminders: remindersForDays(remindDays),
     extendedProperties: { private: { smScope: scope, smExamId: String(exam.id), smStudentId: String(student.id) } }
   };
@@ -50,13 +56,9 @@ function classHourDetails(startHour, endHour) {
   if (!startHour && !endHour) return '';
   const firstNumber = startHour?.number ?? endHour?.number;
   const lastNumber = endHour?.number ?? firstNumber;
-  const lesson = firstNumber
+  return firstNumber
     ? firstNumber === lastNumber ? `${firstNumber}. Stunde` : `${firstNumber}.–${lastNumber}. Stunde`
     : '';
-  const firstTime = startHour?.from;
-  const lastTime = endHour?.until ?? startHour?.until;
-  const time = firstTime && lastTime ? `${firstTime.slice(0, 5)}–${lastTime.slice(0, 5)}` : '';
-  return [lesson, time].filter(Boolean).join(', ');
 }
 function formatTimestamp(value, timeZone = 'Europe/Berlin') {
   const timestamp = new Date(value);

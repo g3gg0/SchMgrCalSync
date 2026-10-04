@@ -61,7 +61,9 @@ test('exam entries include class hours in the title and created/updated times in
     updatedAt: '2026-09-24T06:10:00.000Z'
   };
   const event = examEvent(examWithHours, scope, { ...student, firstname: 'Raphael' }, { prefixStudentName: true });
-  assert.equal(event.summary, 'Raphael - Werken - Kurztest (5. Stunde, 11:30–12:15)');
+  assert.equal(event.summary, 'Raphael - Werken - Kurztest (5. Stunde)');
+  assert.deepEqual(event.start, { dateTime: '2026-10-14T11:30:00', timeZone: 'Europe/Berlin' });
+  assert.deepEqual(event.end, { dateTime: '2026-10-14T12:15:00', timeZone: 'Europe/Berlin' });
   assert.match(event.description, /Erstellt: 23\.09\.26, 07:43/);
   assert.match(event.description, /Aktualisiert: 24\.09\.26, 08:10/);
 });

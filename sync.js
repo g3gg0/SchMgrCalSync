@@ -159,7 +159,8 @@ export async function runCycle(config, env, calendar, db, { dryRun = false } = {
   if (!Number.isSafeInteger(institution) || institution <= 0) throw new Error('Login has no institution ID; refusing unscoped sync.');
   const sources = [
     { scope: scopeId(institution, student.id, config.calendarId), records: exams,
-      prefixStudentName: shouldPrefixStudentName(students.length, config.prefixStudentName), remindDays: config.remindDays },
+      prefixStudentName: shouldPrefixStudentName(students.length, config.prefixStudentName), remindDays: config.remindDays,
+      eventOptions: { timeZone: config.timezone } },
     { scope: scopeId(institution, student.id, config.calendarId, 'sick'), records: sickNotes,
       eventFactory: sickEvent, identityProperty: 'smSickId' },
     { scope: scopeId(institution, student.id, config.calendarId, 'exemptions'), records: exemptions,
