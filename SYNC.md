@@ -21,9 +21,8 @@ HTTPS endpoint, reverse proxy, or inbound port.
 3. Create an OAuth client of type **Desktop app**. No public domain or HTTPS
    redirect URI is required; the helper uses `http://127.0.0.1:8085/` locally.
 4. On your computer, install Node.js 24+, clone this repository, then run
-  `npm ci` in the repository root. Put the Desktop app's
-   `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in a local `.env` file (or set
-   them in the shell). Run `node --env-file=.env google-oauth.js`.
+  `npm ci` in the repository root. Run `npm run google-oauth`; it asks for the
+  OAuth Client ID and Client Secret (the secret input is hidden).
 5. Open the printed Google authorization link in a browser on the same computer
    and approve access. The helper listens only on `127.0.0.1`, uses state and
    PKCE, and times out after five minutes. On success, it prints a
@@ -36,7 +35,9 @@ HTTPS endpoint, reverse proxy, or inbound port.
 The sync container uses that refresh token to renew Google access tokens. The
 Google account must have write access to the target calendar. The requested
 scope is `calendar.events`. If the token expires or access is revoked, run the
-local helper again and replace `GOOGLE_REFRESH_TOKEN` in Portainer.
+local helper again and replace `GOOGLE_REFRESH_TOKEN` in Portainer. If Google
+auth values are missing, the daemon prints the local command and stays idle
+without repeated failures until the stack is redeployed with credentials.
 
 Alternatively use a service account: share the target calendar with its email
 and give it permission to make changes to events. Supply credentials with
@@ -45,19 +46,19 @@ and give it permission to make changes to events. Supply credentials with
 
 ## Environment and commands
 
-Copy `.env.example` to a local `.env` for running the OAuth helper. Portainer
-stack variables must be entered in Portainer and are explicitly passed through
-the Compose `environment` section. The helper prints the refresh token once so
-you can paste it into Portainer; it does not save it to the repository. Never
-commit `.env` or share the refresh token.
+The local helper prompts for Google Client ID and Client Secret if they are not
+already set in the environment. Portainer stack variables must be entered in
+Portainer and are explicitly passed through the Compose `environment` section.
+The helper prints the refresh token once so you can paste it into Portainer; it
+does not save it to the repository. Never commit credentials or share the token.
 
 Required:
 
 - `SCHULMANAGER_USERNAME`, `SCHULMANAGER_PASSWORD`
 - `GOOGLE_CALENDAR_ICAL_URL` or `GOOGLE_CALENDAR_ID`
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_REFRESH_TOKEN`: generated locally with `node google-oauth.js`, then
-  entered in Portainer.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`: enter these
+  in Portainer after generating the token locally. They may all be unset on the
+  first deployment; the daemon will then stay idle and print the setup command.
 
 Optional:
 
@@ -73,14 +74,14 @@ Optional:
 - `SCHULMANAGER_STUDENT_ID`: explicit student; otherwise
   `SCHULMANAGER_STUDENT=1` chooses the first associated student.
 - `SCHULMANAGER_INSTITUTION_ID`, `SCHULMANAGER_BUNDLE_VERSION`.
-- `GOOGLE_OAUTH_PORT=8085`: local loopback port used by `google-oauth.js`.
+- `GOOGLE_OAUTH_PORT=8085`: optional local loopback port used by the helper.
 - `SYNC_DB_PATH=./data/sync.sqlite` and
   `SYNC_SESSION_PATH=./data/schulmanager-session.json` outside Docker.
 - `SCHULMANAGER_IMAGE`: optional GHCR image override; unset uses a local build.
 
 ```bash
 npm ci
-node --env-file=.env google-oauth.js
+npm run google-oauth
 node --env-file=.env sync.js --weeks 26 --dry-run
 node --env-file=.env sync.js --weeks 26
 node --env-file=.env sync.js --daemon --hours 4 --weeks 26

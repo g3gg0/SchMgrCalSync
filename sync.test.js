@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { calendarIdFromUrl, scopeId, nextRun, openDatabase, reconcile, examEvent } from './sync-core.js';
 import { GoogleCalendar } from './google-calendar.js';
-import { oauthSettings } from './google-oauth.js';
-import { configuration, shouldPrefixStudentName } from './sync.js';
+import { getOAuthCredentials, oauthSettings } from './google-oauth.js';
+import { configuration, hasGoogleAuth, shouldPrefixStudentName } from './sync.js';
 const student = { id: 12, classId: 34 };
 const scope = scopeId(56, student.id, 'test-calendar');
 const exam = { id: 78, date: '2026-10-14', subject: { name: 'Math' }, type: { name: 'Test' }, comment: 'Chapters 1–2' };
@@ -111,6 +111,18 @@ test('OAuth helper uses only a local loopback callback', () => {
   assert.throws(() => oauthSettings({ GOOGLE_OAUTH_PORT: '80' }), /Invalid GOOGLE_OAUTH_PORT/);
 });
 
+test('local OAuth helper prompts for missing credentials and hides the client secret prompt', async () => {
+  const prompts = [];
+  const credentials = await getOAuthCredentials({}, async (message, hidden) => {
+    prompts.push({ message, hidden });
+    return hidden ? 'client-secret' : 'client-id';
+  });
+  assert.deepEqual(credentials, { clientId: 'client-id', clientSecret: 'client-secret' });
+  assert.deepEqual(prompts.map(prompt => prompt.hidden), [false, true]);
+  assert.deepEqual(await getOAuthCredentials({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret' }),
+    { clientId: 'id', clientSecret: 'secret' });
+});
+
 test('Google deleted ID replacement stays linked and is rediscovered on the next sync', async () => {
   const db = openDatabase(':memory:'); const calendar = fakeCalendar();
   const create = calendar.upsert;
@@ -156,6 +168,9 @@ test('environment configuration supports explicit selection and rejects conflict
   const config = configuration(env, { weeks: '8', hours: '4' });
   assert.equal(config.weeks, 8); assert.equal(config.studentIndex, undefined);
   assert.equal(config.prefixStudentName, false);
+  assert.equal(hasGoogleAuth({}), false);
+  assert.equal(hasGoogleAuth({ GOOGLE_REFRESH_TOKEN: 'token' }), false);
+  assert.equal(hasGoogleAuth({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret', GOOGLE_REFRESH_TOKEN: 'token' }), true);
   assert.equal(configuration({ ...env, SCHULMANAGER_STUDENT_ID: '' }, {}).studentId, undefined);
   assert.equal(configuration({ ...env, SYNC_PREFIX_STUDENT_NAME: 'true' }, {}).prefixStudentName, true);
   assert.equal(shouldPrefixStudentName(1, false), false);

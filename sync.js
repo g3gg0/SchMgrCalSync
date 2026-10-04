@@ -34,6 +34,21 @@ export function configuration(env, values) {
 export function shouldPrefixStudentName(studentCount, forced) {
   return forced || studentCount > 1;
 }
+export function hasGoogleAuth(env) {
+  const hasOAuthCredentials = env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REFRESH_TOKEN;
+  return Boolean(hasOAuthCredentials || env.GOOGLE_SERVICE_ACCOUNT_JSON || env.GOOGLE_APPLICATION_CREDENTIALS);
+}
+function waitForShutdown() {
+  return new Promise(resolve => {
+    const shutdown = () => {
+      process.off('SIGINT', shutdown);
+      process.off('SIGTERM', shutdown);
+      resolve();
+    };
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  });
+}
 export async function runCycle(config, env, calendar, db, { dryRun = false } = {}) {
   const client = new SchulmanagerClient({ username: env.SCHULMANAGER_USERNAME, password: env.SCHULMANAGER_PASSWORD,
     institutionId: config.institutionId, bundleVersion: env.SCHULMANAGER_BUNDLE_VERSION,
@@ -61,6 +76,11 @@ export async function main() {
     console.log('Usage: node sync.js [--weeks 26] [--daemon --hours 4] [--dry-run]\nEnvironment configuration and OAuth setup: see SYNC.md. Runs immediately; daemon then runs at matching local hour boundaries.'); return;
   }
   const env = process.env, config = configuration(env, values);
+  if (!hasGoogleAuth(env) && values.daemon) {
+    console.error('Google auth is not configured.\nOn your private computer run: npm run google-oauth\nThen set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Portainer and redeploy this stack.\nContainer is idle until stopped.');
+    await waitForShutdown();
+    return;
+  }
   const calendar = new GoogleCalendar(googleAuth(env), config.calendarId);
   await mkdir(dirname(config.dbPath), { recursive: true });
   const db = openDatabase(config.dbPath);

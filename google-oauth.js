@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { createInterface } from 'node:readline/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { OAuth2Client } from 'google-auth-library';
@@ -13,11 +14,50 @@ export function oauthSettings(env) {
   return { port, redirectUri: `http://127.0.0.1:${port}/` };
 }
 
+function promptLine(message) {
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  return prompt.question(message).finally(() => prompt.close());
+}
+
+function promptHidden(message) {
+  if (!process.stdin.isTTY) throw new Error('Set GOOGLE_CLIENT_SECRET for non-interactive use.');
+  process.stderr.write(message);
+  const previousRaw = process.stdin.isRaw;
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  return new Promise((resolve, reject) => {
+    const finish = (error, value) => {
+      process.stdin.off('data', receive);
+      process.stdin.setRawMode(previousRaw);
+      process.stdin.pause();
+      process.stderr.write('\n');
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const receive = chunk => {
+      let secret = '';
+      for (const character of chunk.toString('utf8')) {
+        if (character === '\u0003') { finish(new Error('OAuth authorization cancelled.')); return; }
+        if (character === '\r' || character === '\n') { finish(null, secret); return; }
+        if (character === '\u007f' || character === '\b') secret = secret.slice(0, -1);
+        else if (character >= ' ') secret += character;
+      }
+    };
+    process.stdin.on('data', receive);
+  });
+}
+
+export async function getOAuthCredentials(env, prompt = (message, hidden) => hidden ? promptHidden(message) : promptLine(message)) {
+  const clientId = env.GOOGLE_CLIENT_ID || await prompt('Google OAuth Client ID: ', false);
+  const clientSecret = env.GOOGLE_CLIENT_SECRET || await prompt('Google OAuth Client Secret (input hidden): ', true);
+  if (!clientId.trim() || !clientSecret.trim()) throw new Error('Google OAuth client ID and client secret are required.');
+  return { clientId: clientId.trim(), clientSecret: clientSecret.trim() };
+}
+
 export async function authorizeGoogle(env) {
-  const { GOOGLE_CLIENT_ID: id, GOOGLE_CLIENT_SECRET: secret } = env;
-  if (!id || !secret) throw new Error('Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET for a Google Desktop app OAuth client.');
+  const { clientId, clientSecret } = await getOAuthCredentials(env);
   const { port, redirectUri } = oauthSettings(env);
-  const client = new OAuth2Client(id, secret, redirectUri);
+  const client = new OAuth2Client(clientId, clientSecret, redirectUri);
   const state = randomBytes(32).toString('hex');
   const { codeVerifier, codeChallenge } = await client.generateCodeVerifierAsync();
   let resolveAuthorization, rejectAuthorization;
@@ -52,6 +92,7 @@ export async function authorizeGoogle(env) {
       if (!tokens.refresh_token) throw new Error('Google did not return a refresh token; revoke the existing grant and authorize again.');
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Google authorization complete. Copy the refresh token from your terminal into Portainer.');
       console.log(`\nGOOGLE_REFRESH_TOKEN=${tokens.refresh_token}`);
+      console.log('Set this value in Portainer as GOOGLE_REFRESH_TOKEN, then redeploy the stack.');
       resolveAuthorization();
     } catch (error) {
       response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Google authorization failed. Check the terminal.');

@@ -10,6 +10,7 @@
     "start": "node cli.js",
     "sync": "node sync.js",
     "google-auth": "node google-oauth.js",
+    "google-oauth": "node google-oauth.js",
     "test": "node --test --test-isolation=none"
   },
   "dependencies": {
