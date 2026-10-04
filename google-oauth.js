@@ -26,6 +26,7 @@ function promptHidden(message) {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   return new Promise((resolve, reject) => {
+    let secret = '';
     const finish = (error, value) => {
       process.stdin.off('data', receive);
       process.stdin.setRawMode(previousRaw);
@@ -35,7 +36,6 @@ function promptHidden(message) {
       else resolve(value);
     };
     const receive = chunk => {
-      let secret = '';
       for (const character of chunk.toString('utf8')) {
         if (character === '\u0003') { finish(new Error('OAuth authorization cancelled.')); return; }
         if (character === '\r' || character === '\n') { finish(null, secret); return; }
