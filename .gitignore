@@ -1,0 +1,8 @@
+*.har
+.session.json
+.session.json.*.tmp
+node_modules/
+.npm-cache/
+.env
+data/
+service-account.json

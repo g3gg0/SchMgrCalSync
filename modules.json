@@ -1,0 +1,686 @@
+{
+  "modules": [
+    {
+      "name": "main",
+      "label": "Account / school"
+    },
+    {
+      "name": "exemptions",
+      "label": "Beurlaubung"
+    },
+    {
+      "name": "letters",
+      "label": "Elternbriefe"
+    },
+    {
+      "name": "conferences",
+      "label": "Elternsprechtag"
+    },
+    {
+      "name": "absences",
+      "label": "Fehlzeiten"
+    },
+    {
+      "name": "allday",
+      "label": "Ganztag"
+    },
+    {
+      "name": "calendar",
+      "label": "Kalender"
+    },
+    {
+      "name": "exams",
+      "label": "Klassenarbeiten"
+    },
+    {
+      "name": "classbook",
+      "label": "Klassenbuch"
+    },
+    {
+      "name": "sick",
+      "label": "Krankmeldung"
+    },
+    {
+      "name": "learning",
+      "label": "Lernen"
+    },
+    {
+      "name": "messenger",
+      "label": "Nachrichten"
+    },
+    {
+      "name": "resources",
+      "label": "Ressourcen"
+    },
+    {
+      "name": "schoolinformation",
+      "label": "Schulinformationen"
+    },
+    {
+      "name": "tiles",
+      "label": "Schwarzes Brett"
+    },
+    {
+      "name": "schedules",
+      "label": "Stundenplan"
+    },
+    {
+      "name": "schooldata",
+      "label": "Verwaltung"
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "main/get-institution",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-institution"
+      }
+    },
+    {
+      "id": "main/get-active-modules",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-active-modules"
+      }
+    },
+    {
+      "id": "main/get-system-status-messages",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-system-status-messages"
+      }
+    },
+    {
+      "id": "main/get-all-holidays",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-all-holidays"
+      }
+    },
+    {
+      "id": "main/get-settings",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-settings"
+      }
+    },
+    {
+      "id": "main/get-current-term",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-current-term"
+      }
+    },
+    {
+      "id": "main/get-grading-system-settings-of-term",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-grading-system-settings-of-term",
+        "parameters": {
+          "termId": "$termId"
+        }
+      }
+    },
+    {
+      "id": "main/get-visible-external-integrations",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-visible-external-integrations"
+      }
+    },
+    {
+      "id": "main/get-new-notifications-count",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-new-notifications-count"
+      }
+    },
+    {
+      "id": "messenger/chat-is-visible",
+      "module": "messenger",
+      "request": {
+        "moduleName": "messenger",
+        "endpointName": "chat-is-visible"
+      }
+    },
+    {
+      "id": "main/get-upcoming-conferences",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-upcoming-conferences"
+      }
+    },
+    {
+      "id": "allday/get-allday-student-ids",
+      "module": "allday",
+      "request": {
+        "moduleName": "allday",
+        "endpointName": "get-allday-student-ids"
+      }
+    },
+    {
+      "id": "main/exams-visible-for-students",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "exams-visible-for-students"
+      }
+    },
+    {
+      "id": "messenger/count-new-messages",
+      "module": "messenger",
+      "request": {
+        "moduleName": "messenger",
+        "endpointName": "count-new-messages"
+      }
+    },
+    {
+      "id": "main/event-category-exists",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "event-category-exists"
+      }
+    },
+    {
+      "id": "main/get-unread-letters-for-widget",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-unread-letters-for-widget"
+      }
+    },
+    {
+      "id": "schedules/get-substitution-texts-for-widget",
+      "module": "schedules",
+      "request": {
+        "moduleName": "schedules",
+        "endpointName": "get-substitution-texts-for-widget"
+      }
+    },
+    {
+      "id": "main/get-tiles",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "get-tiles"
+      }
+    },
+    {
+      "id": "calendar/get-events-for-user",
+      "module": "calendar",
+      "request": {
+        "moduleName": "calendar",
+        "endpointName": "get-events-for-user",
+        "parameters": {
+          "start": "$start",
+          "end": "$end",
+          "includeHolidays": false
+        }
+      }
+    },
+    {
+      "id": "exams/get-exams",
+      "module": "exams",
+      "request": {
+        "moduleName": "exams",
+        "endpointName": "get-exams",
+        "parameters": {
+          "student": "$student",
+          "start": "$start",
+          "end": "$end"
+        }
+      }
+    },
+    {
+      "id": "main/poqa:main/class:findAll",
+      "module": "main",
+      "request": {
+        "moduleName": null,
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "main/class",
+            "action": "findAll",
+            "parameters": [
+              {
+                "attributes": [
+                  "id",
+                  "name",
+                  "gradeLevels",
+                  "isCourseSystem"
+                ],
+                "where": {
+                  "termId": "$termId"
+                }
+              }
+            ]
+          },
+          "uiState": "main.account"
+        }
+      }
+    },
+    {
+      "id": "exemptions/poqa:modules/exemptions/exemption-request:findAll",
+      "module": "exemptions",
+      "request": {
+        "moduleName": "exemptions",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "modules/exemptions/exemption-request",
+            "action": "findAll",
+            "parameters": [
+              {
+                "where": {
+                  "studentId": "$studentId",
+                  "isInternal": {
+                    "$not": true
+                  }
+                },
+                "include": [
+                  {
+                    "association": "student",
+                    "required": true
+                  }
+                ]
+              }
+            ]
+          },
+          "uiState": "main.modules.exemptions.request"
+        }
+      }
+    },
+    {
+      "id": "letters/get-letters",
+      "module": "letters",
+      "request": {
+        "moduleName": "letters",
+        "endpointName": "get-letters"
+      }
+    },
+    {
+      "id": "calendar/poqa:main/holiday:findOne",
+      "module": "calendar",
+      "request": {
+        "moduleName": "calendar",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "main/holiday",
+            "action": "findOne",
+            "parameters": [
+              {
+                "attributes": [
+                  "id"
+                ]
+              }
+            ]
+          },
+          "uiState": "main.modules.calendar.overview"
+        }
+      }
+    },
+    {
+      "id": "calendar/get-event-categories",
+      "module": "calendar",
+      "request": {
+        "moduleName": "calendar",
+        "endpointName": "get-event-categories"
+      }
+    },
+    {
+      "id": "exams/poqa:main/student:getClass",
+      "module": "exams",
+      "request": {
+        "moduleName": "exams",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "main/student",
+            "action": "getClass",
+            "parameters": [
+              {
+                "include": [
+                  {
+                    "association": "examBlocks",
+                    "required": true,
+                    "where": {
+                      "startDate": {
+                        "$lte": "$end"
+                      },
+                      "endDate": {
+                        "$gte": "$start"
+                      }
+                    },
+                    "include": [
+                      {
+                        "association": "startClassHour",
+                        "required": true
+                      },
+                      {
+                        "association": "endClassHour",
+                        "required": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "instanceId": "$studentId"
+          },
+          "uiState": "main.modules.exams.view"
+        }
+      }
+    },
+    {
+      "id": "exams/poqa:modules/calendar/event:findAll",
+      "module": "exams",
+      "request": {
+        "moduleName": "exams",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "modules/calendar/event",
+            "action": "findAll",
+            "parameters": [
+              {
+                "where": {
+                  "blockExams": true,
+                  "start": {
+                    "$lte": "$end"
+                  },
+                  "end": {
+                    "$gte": "$start"
+                  }
+                },
+                "include": [
+                  {
+                    "association": "visibleForGroups",
+                    "required": true,
+                    "attributes": [
+                      "id"
+                    ],
+                    "include": [
+                      {
+                        "association": "students",
+                        "required": true,
+                        "attributes": [
+                          "id"
+                        ],
+                        "where": {
+                          "id": "$studentId"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "uiState": "main.modules.exams.view"
+        }
+      }
+    },
+    {
+      "id": "classbook/get-topics",
+      "module": "classbook",
+      "request": {
+        "moduleName": "classbook",
+        "endpointName": "get-topics",
+        "parameters": {
+          "student": "$student"
+        }
+      }
+    },
+    {
+      "id": "classbook/get-current-next-or-previous-term",
+      "module": "classbook",
+      "request": {
+        "moduleName": "classbook",
+        "endpointName": "get-current-next-or-previous-term"
+      }
+    },
+    {
+      "id": "classbook/poqa:main/class:findAll",
+      "module": "classbook",
+      "request": {
+        "moduleName": "classbook",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "main/class",
+            "action": "findAll",
+            "parameters": [
+              {
+                "attributes": [
+                  "id",
+                  "name",
+                  "gradeLevels",
+                  "isCourseSystem"
+                ],
+                "where": {
+                  "termId": "$termId"
+                }
+              }
+            ]
+          },
+          "uiState": "main.modules.classbook.reports2.student"
+        }
+      }
+    },
+    {
+      "id": "classbook/get-entry-statistics",
+      "module": "classbook",
+      "request": {
+        "moduleName": "classbook",
+        "endpointName": "get-entry-statistics",
+        "parameters": {
+          "student": "$student",
+          "termId": "$termId"
+        }
+      }
+    },
+    {
+      "id": "classbook/poqa:main/subject:findAll",
+      "module": "classbook",
+      "request": {
+        "moduleName": "classbook",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "main/subject",
+            "action": "findAll",
+            "parameters": [
+              {
+                "attributes": [
+                  "id",
+                  "name",
+                  "abbreviation",
+                  "orderIndex",
+                  "isPseudoSubject",
+                  "isGraded"
+                ]
+              }
+            ]
+          },
+          "uiState": "main.modules.classbook.reports2.student.entries"
+        }
+      }
+    },
+    {
+      "id": "sick/get-sick-notes-as-student-fully-entitled",
+      "module": "sick",
+      "request": {
+        "moduleName": "sick",
+        "endpointName": "get-sick-notes-as-student-fully-entitled"
+      }
+    },
+    {
+      "id": "sick/poqa:main/student:findAll",
+      "module": "sick",
+      "request": {
+        "moduleName": "sick",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "main/student",
+            "action": "findAll",
+            "parameters": [
+              {
+                "attributes": [
+                  "id",
+                  "firstname",
+                  "lastname"
+                ],
+                "where": {
+                  "id": {
+                    "$in": [
+                      "$studentId"
+                    ]
+                  }
+                },
+                "include": [
+                  {
+                    "association": "certificateObligations",
+                    "attributes": [
+                      "id",
+                      "defaultLevel",
+                      "examLevel",
+                      "start",
+                      "end",
+                      "studentId"
+                    ],
+                    "required": false,
+                    "where": {
+                      "end": {
+                        "$gte": "$start"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "uiState": "main.modules.sick.reports"
+        }
+      }
+    },
+    {
+      "id": "sick/poqa:modules/exemptions/exemption-request:findOne",
+      "module": "sick",
+      "request": {
+        "moduleName": "sick",
+        "endpointName": "poqa",
+        "parameters": {
+          "action": {
+            "model": "modules/exemptions/exemption-request",
+            "action": "findOne",
+            "parameters": [
+              {
+                "attributes": [
+                  "id",
+                  "studentId",
+                  "startDate",
+                  "endDate",
+                  "startTime",
+                  "endTime"
+                ],
+                "where": {
+                  "studentId": "$studentId",
+                  "endDate": {
+                    "$gte": "$start"
+                  },
+                  "startDate": {
+                    "$lte": "$end"
+                  },
+                  "isInternal": {
+                    "$not": true
+                  },
+                  "startTime": null,
+                  "endTime": null,
+                  "granted": true
+                }
+              }
+            ]
+          },
+          "uiState": "main.modules.sick.reports"
+        }
+      }
+    },
+    {
+      "id": "learning/get-current-previous-or-next-term",
+      "module": "learning",
+      "request": {
+        "moduleName": "learning",
+        "endpointName": "get-current-previous-or-next-term"
+      }
+    },
+    {
+      "id": "learning/get-learning-courses",
+      "module": "learning",
+      "request": {
+        "moduleName": "learning",
+        "endpointName": "get-learning-courses",
+        "parameters": {
+          "student": "$student"
+        }
+      }
+    },
+    {
+      "id": "learning/get-new-learning-units-by-course",
+      "module": "learning",
+      "request": {
+        "moduleName": "learning",
+        "endpointName": "get-new-learning-units-by-course",
+        "parameters": {
+          "student": "$student"
+        }
+      }
+    },
+    {
+      "id": "learning/get-course-units",
+      "module": "learning",
+      "request": {
+        "moduleName": "learning",
+        "endpointName": "get-course-units",
+        "parameters": {
+          "student": "$student",
+          "course": "$course"
+        }
+      }
+    },
+    {
+      "id": "messenger/get-subscriptions",
+      "module": "messenger",
+      "request": {
+        "moduleName": "messenger",
+        "endpointName": "get-subscriptions",
+        "parameters": {
+          "all": false,
+          "includeArchived": false,
+          "reason": "whenLoadedSubscriptions"
+        }
+      }
+    },
+    {
+      "id": "messenger/get-quiet-hours",
+      "module": "messenger",
+      "request": {
+        "moduleName": "messenger",
+        "endpointName": "get-quiet-hours"
+      }
+    }
+  ]
+}

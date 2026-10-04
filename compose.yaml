@@ -1,0 +1,15 @@
+services:
+  schulmanager-sync:
+    image: ${SCHULMANAGER_IMAGE:-schulmanager-sync:local}
+    build: .
+    env_file: .env
+    environment:
+      SYNC_DB_PATH: /data/sync.sqlite
+      SYNC_SESSION_PATH: /data/schulmanager-session.json
+    volumes:
+      - sync-data:/data
+    command: ["--daemon"]
+    restart: unless-stopped
+    init: true
+volumes:
+  sync-data:

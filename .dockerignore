@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!client.js
+!session.js
+!sync.js
+!sync-core.js
+!google-calendar.js

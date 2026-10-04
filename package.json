@@ -1,0 +1,18 @@
+{
+  "name": "schulmanager-cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node cli.js",
+    "sync": "node sync.js",
+    "google-auth": "node google-oauth.js",
+    "test": "node --test --test-isolation=none"
+  },
+  "dependencies": {
+    "google-auth-library": "^11.1.0"
+  }
+}
